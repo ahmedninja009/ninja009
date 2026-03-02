@@ -1,8 +1,8 @@
+import os
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 import yt_dlp
 import asyncio
-import os
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -10,165 +10,116 @@ intents.voice_states = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Queues
 queue = []
-history = []
 current = None
-volume_level = 0.5  # 50% volume
-loop_mode = "none"  # "none", "one", "all"
 
-# YTDL & FFMPEG options
-ytdl_opts = {
-    "format": "bestaudio",
-    "quiet": True,
-    "noplaylist": True,
+ytdl_options = {
+    'format': 'bestaudio',
+    'quiet': True,
+    'noplaylist': True,
 }
 
-ffmpeg_opts = {
-    "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
-    "options": "-vn",
+ffmpeg_options = {
+    'options': '-vn',
 }
 
-# ----------------------
-# MUSIC PLAY FUNCTION
-# ----------------------
 async def play_next(ctx):
-    global current, history
+    global current
     if len(queue) == 0:
+        await ctx.send("🎧 خلصت القائمة!")
         current = None
         if ctx.voice_client:
             await ctx.voice_client.disconnect()
-        await ctx.send("خلصت القائمة 🎧")
         return
 
-    query = queue.pop(0)
-    history.append(query)
+    url = queue.pop(0)
+    with yt_dlp.YoutubeDL(ytdl_options) as ydl:
+        try:
+            info = ydl.extract_info(url, download=False)
+        except Exception:
+            await ctx.send("❌ حصل خطأ في تحميل الأغنية.")
+            await play_next(ctx)
+            return
 
-    try:
-        with yt_dlp.YoutubeDL(ytdl_opts) as ydl:
-            if query.startswith("http"):
-                info = ydl.extract_info(query, download=False)
-            else:
-                info = ydl.extract_info(f"ytsearch1:{query}", download=False)
-                info = info['entries'][0]
-            url = info['url']
-            title = info.get("title", "Unknown")
-    except Exception as e:
-        await ctx.send(f"❌ حصل خطأ في تشغيل الأغنية: {e}")
-        await play_next(ctx)
-        return
+    stream_url = info['url']
+    current = info['title']
 
-    try:
-        source = discord.FFmpegPCMAudio(url, **ffmpeg_opts)
-        ctx.voice_client.play(
-            source,
-            after=lambda e: asyncio.run_coroutine_threadsafe(play_next(ctx), bot.loop)
-        )
-        current = title
-        await ctx.send(f"🎶 شغال دلوقتي: {title}")
-    except Exception as e:
-        await ctx.send(f"❌ حصل خطأ في تشغيل الصوت: {e}")
-        await play_next(ctx)
+    source = await discord.FFmpegOpusAudio.from_probe(stream_url, **ffmpeg_options)
+    ctx.voice_client.play(
+        source,
+        after=lambda e: asyncio.run_coroutine_threadsafe(play_next(ctx), bot.loop)
+    )
 
-# ----------------------
-# EVENTS
-# ----------------------
-@bot.event
-async def on_ready():
-    print(f"Bot جاهز: {bot.user}")
+    await ctx.send(f"🎶 شغال دلوقتي: **{current}**")
 
-# ----------------------
-# COMMANDS
-# ----------------------
+# ====== Commands ======
+
 @bot.command()
 async def join(ctx):
     if ctx.author.voice:
-        channel = ctx.author.voice.channel
-        await channel.connect()
-        await ctx.send("دخلت الروم 🎧")
+        await ctx.author.voice.channel.connect()
+        await ctx.send("✅ دخلت الروم الصوتي")
     else:
-        await ctx.send("لازم تكون في روم صوتي!")
+        await ctx.send("❌ لازم تكون في روم صوتي!")
 
 @bot.command()
 async def leave(ctx):
-    queue.clear()
     if ctx.voice_client:
         await ctx.voice_client.disconnect()
-        await ctx.send("خرجت من الروم ⛔")
+        await ctx.send("✅ خرجت من الروم")
+    else:
+        await ctx.send("❌ البوت مش موجود في أي روم")
 
 @bot.command()
-async def play(ctx, *, query):
+async def play(ctx, *, url: str):
     if not ctx.author.voice:
-        return await ctx.send("لازم تكون في روم صوتي!")
+        return await ctx.send("❌ لازم تكون في روم صوتي!")
 
     if not ctx.voice_client:
         await ctx.author.voice.channel.connect()
 
-    queue.append(query)
+    queue.append(url)
 
-    if not ctx.voice_client.is_playing():
+    if not ctx.voice_client.is_playing() and current is None:
         await play_next(ctx)
     else:
-        await ctx.send(f"تمت إضافة الأغنية للقائمة ✅: {query}")
+        await ctx.send(f"✅ تمت إضافة الأغنية للقائمة: {url}")
 
 @bot.command()
 async def skip(ctx):
     if ctx.voice_client and ctx.voice_client.is_playing():
         ctx.voice_client.stop()
-        await ctx.send("تم التخطي ⏭️")
+        await ctx.send("⏭️ تم التخطي")
+    else:
+        await ctx.send("❌ مفيش أغنية شغالة دلوقتي")
 
 @bot.command()
 async def stop(ctx):
     queue.clear()
     if ctx.voice_client:
+        ctx.voice_client.stop()
         await ctx.voice_client.disconnect()
-        await ctx.send("تم الايقاف والخروج ⛔")
+    await ctx.send("⛔ تم الايقاف والخروج")
 
 @bot.command()
-async def pause(ctx):
-    if ctx.voice_client and ctx.voice_client.is_playing():
-        ctx.voice_client.pause()
-        await ctx.send("⏸️ تم الإيقاف مؤقت")
-
-@bot.command()
-async def resume(ctx):
-    if ctx.voice_client and ctx.voice_client.is_paused():
-        ctx.voice_client.resume()
-        await ctx.send("▶️ تم استئناف التشغيل")
+async def nowplaying(ctx):
+    if current:
+        await ctx.send(f"🎶 دلوقتي شغال: **{current}**")
+    else:
+        await ctx.send("❌ مفيش أغنية دلوقتي")
 
 @bot.command()
 async def queue_list(ctx):
     if queue:
-        msg = "\n".join(f"{i+1}. {song}" for i, song in enumerate(queue))
-        await ctx.send(f"📜 قائمة الانتظار:\n{msg}")
+        msg = "\n".join(f"{i+1}. {q}" for i, q in enumerate(queue))
+        await ctx.send(f"📜 قائمة الأغاني:\n{msg}")
     else:
-        await ctx.send("لا توجد أغاني في القائمة 🎶")
+        await ctx.send("📭 قائمة الأغاني فاضية")
 
-@bot.command()
-async def current_song(ctx):
-    if current:
-        await ctx.send(f"🎵 دلوقتي شغال: {current}")
-    else:
-        await ctx.send("لا توجد أغنية حالياً")
+# ===== Bot Startup =====
+token = os.getenv("DISCORD_TOKEN")  # لازم تضيفه كـ Variable في Railway
 
-@bot.command()
-async def commands_list(ctx):
-    cmds = """
-**Commands List:**
-`play [p]` : Play song or add to queue (يمكنك كتابة اسم الأغنية)
-`pause` : Pause the song
-`resume` : Resume the song
-`queue` : Show the queue
-`skip` : Skip current song
-`stop` : Stop and clear queue
-`join` : Join voice channel
-`leave` : Leave voice channel
-`current` : Show current song
-"""
-    await ctx.send(cmds)
-
-# ----------------------
-# TOKEN
-# ----------------------
-token = "DISCORD_TOKEN"  # ضع توكن البوت هنا
-bot.run(token)
+if not token:
+    print("❌ TOKEN مش موجود! اعمل Secret في Railway باسم DISCORD_TOKEN")
+else:
+    bot.run(token)

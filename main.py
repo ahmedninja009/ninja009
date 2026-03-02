@@ -1,98 +1,111 @@
 import discord
 from discord.ext import commands
-import asyncio
-import yt_dlp
 import os
+import asyncio
+from yt_dlp import YoutubeDL
 
-# إعداد intents بشكل آمن
 intents = discord.Intents.default()
-intents.message_content = True  # علشان نقدر نقرأ أوامر المستخدمين
+intents.message_content = True
+intents.voice_states = True  # ضروري لتشغيل الصوت
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# قائمة انتظار الأغاني لكل جيلد
+# إعدادات yt-dlp
+YDL_OPTIONS = {
+    'format': 'bestaudio/best',
+    'noplaylist': True
+}
+
+FFMPEG_OPTIONS = {
+    'options': '-vn'
+}
+
+# Queue لكل سيرفر
 queues = {}
 
-# جلب التوكن من متغير البيئة (Railway Secret)
-TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+# دالة مساعدة لتشغيل الصوت
+async def play_song(ctx, url):
+    if ctx.guild.id not in queues:
+        queues[ctx.guild.id] = []
 
-# تشغيل الأغنية
-@bot.command()
-async def play(ctx, *, search: str):
-    if not ctx.author.voice:
-        return await ctx.send("انت لازم تكون في قناة صوتية أولاً!")
+    def next_song(error=None):
+        if queues[ctx.guild.id]:
+            source = queues[ctx.guild.id].pop(0)
+            ctx.guild.voice_client.play(source, after=next_song)
 
-    voice_channel = ctx.author.voice.channel
-    guild_id = ctx.guild.id
+    with YoutubeDL(YDL_OPTIONS) as ydl:
+        info = ydl.extract_info(url, download=False)
+        url2 = info['url']
+        source = discord.FFmpegPCMAudio(url2, **FFMPEG_OPTIONS)
 
-    if guild_id not in queues:
-        queues[guild_id] = []
-
-    # البحث عن الأغنية على يوتيوب
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'noplaylist': True,
-        'quiet': True,
-        'default_search': 'ytsearch',
-        'extract_flat': 'in_playlist'
-    }
-
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(search, download=False)
-        url = info['entries'][0]['url'] if 'entries' in info else info['url']
-        title = info['entries'][0]['title'] if 'entries' in info else info['title']
-
-    queues[guild_id].append((title, url))
-    await ctx.send(f"✅ **Added to queue:** {title}")
-
-    # لو البوت مش متصل في القناة الصوتية، اتصل وشغل
-    if not ctx.voice_client:
-        vc = await voice_channel.connect()
-        await play_next(ctx, vc)
-    elif not ctx.voice_client.is_playing():
-        await play_next(ctx, ctx.voice_client)
-
-async def play_next(ctx, vc):
-    guild_id = ctx.guild.id
-    if queues[guild_id]:
-        title, url = queues[guild_id].pop(0)
-        ydl_opts = {
-            'format': 'bestaudio',
-            'quiet': True,
-        }
-        ffmpeg_opts = {
-            'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-            'options': '-vn'
-        }
-
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            audio_url = info['url']
-
-        vc.play(discord.FFmpegPCMAudio(audio_url, **ffmpeg_opts), after=lambda e: asyncio.run_coroutine_threadsafe(play_next(ctx, vc), bot.loop))
-        await ctx.send(f"🎶 **Now Playing:** {title}")
+    if not ctx.voice_client.is_playing():
+        ctx.voice_client.play(source, after=next_song)
+        await ctx.send(f"**Playing:** {info['title']}")
     else:
-        await vc.disconnect()
+        queues[ctx.guild.id].append(source)
+        await ctx.send(f"**Added to queue:** {info['title']}")
 
-# أمر skip
+# أوامر البوت
+@bot.command()
+async def join(ctx):
+    if ctx.author.voice:
+        channel = ctx.author.voice.channel
+        await channel.connect()
+        await ctx.send(f"Joined {channel}")
+    else:
+        await ctx.send("You are not in a voice channel!")
+
+@bot.command()
+async def leave(ctx):
+    if ctx.voice_client:
+        await ctx.voice_client.disconnect()
+        await ctx.send("Disconnected!")
+    else:
+        await ctx.send("I'm not in a voice channel!")
+
+@bot.command()
+async def play(ctx, *, query):
+    if not ctx.voice_client:
+        if ctx.author.voice:
+            await ctx.author.voice.channel.connect()
+        else:
+            await ctx.send("Join a voice channel first!")
+            return
+
+    # تحقق إذا المدخل URL أو كلمة بحث
+    if "youtube.com" in query or "youtu.be" in query:
+        url = query
+    else:
+        # بحث على يوتيوب
+        with YoutubeDL({'format':'bestaudio','noplaylist':'True','default_search':'ytsearch'}) as ydl:
+            info = ydl.extract_info(query, download=False)['entries'][0]
+            url = info['webpage_url']
+
+    await play_song(ctx, url)
+
+@bot.command()
+async def stop(ctx):
+    if ctx.voice_client and ctx.voice_client.is_playing():
+        ctx.voice_client.stop()
+        await ctx.send("Stopped playing!")
+    else:
+        await ctx.send("Nothing is playing!")
+
 @bot.command()
 async def skip(ctx):
     if ctx.voice_client and ctx.voice_client.is_playing():
         ctx.voice_client.stop()
-        await ctx.send("⏭ Skipped current song!")
+        await ctx.send("Skipped current song!")
     else:
-        await ctx.send("لا يوجد أغنية حالياً للتخطي.")
+        await ctx.send("Nothing is playing!")
 
-# أمر stop
 @bot.command()
-async def stop(ctx):
-    if ctx.voice_client:
-        ctx.voice_client.stop()
-        await ctx.voice_client.disconnect()
-        await ctx.send("⏹ Stopped and disconnected from voice channel!")
-        queues[ctx.guild.id] = []
+async def queue(ctx):
+    if ctx.guild.id in queues and queues[ctx.guild.id]:
+        await ctx.send(f"Queue length: {len(queues[ctx.guild.id])} songs")
     else:
-        await ctx.send("البوت مش متصل بأي قناة صوتية.")
+        await ctx.send("Queue is empty!")
 
 # تشغيل البوت
+TOKEN = os.getenv("DISCORD_TOKEN")
 bot.run(TOKEN)

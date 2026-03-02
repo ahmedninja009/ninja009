@@ -1,125 +1,117 @@
+import os
 import discord
 from discord.ext import commands
-import yt_dlp
-import asyncio
-import json
-import os
+from discord import FFmpegPCMAudio
+from yt_dlp import YoutubeDL
 
-# ---------- Prefix System ----------
-PREFIX_FILE = "prefixes.json"
+# ================== TOKEN ==================
+TOKEN = os.environ.get("TOKEN")
+if not TOKEN:
+    raise ValueError("Please set your TOKEN in Environment Variables.")
 
-def load_prefixes():
-    if not os.path.exists(PREFIX_FILE):
-        with open(PREFIX_FILE, "w") as f:
-            json.dump({}, f)
-    with open(PREFIX_FILE, "r") as f:
-        return json.load(f)
+# ================== INTENTS ==================
+intents = discord.Intents.default()
+intents.message_content = True
+intents.voice_states = True
 
-def save_prefixes(prefixes):
-    with open(PREFIX_FILE, "w") as f:
-        json.dump(prefixes, f, indent=4)
+bot = commands.Bot(command_prefix="!", intents=intents)
 
-prefixes = load_prefixes()
+# ================== QUEUE ==================
+queue = []
 
-def get_prefix(bot, message):
-    if not message.guild:
-        return "!"
-    return prefixes.get(str(message.guild.id), "!")
-
-# ---------- Intents ----------
-intents = discord.Intents.all()
-bot = commands.Bot(command_prefix=get_prefix, intents=intents)
-
-# ---------- Ready ----------
-@bot.event
-async def on_ready():
-    print(f"✅ Logged in as {bot.user}")
-
-# ---------- Ping ----------
-@bot.command()
-async def ping(ctx):
-    latency = round(bot.latency * 1000)
-    await ctx.send(f"🏓 Pong! {latency}ms")
-
-# ---------- Set Prefix ----------
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def setprefix(ctx, new_prefix):
-    prefixes[str(ctx.guild.id)] = new_prefix
-    save_prefixes(prefixes)
-    await ctx.send(f"✅ تم تغيير البرفكس إلى: `{new_prefix}`")
-
-# ---------- Music Setup ----------
-ydl_opts = {
-    'format': 'bestaudio',
-    'quiet': True,
-}
-
-ffmpeg_options = {
+# ================== OPTIONS ==================
+FFMPEG_OPTIONS = {
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
     'options': '-vn'
 }
 
-# ---------- Join ----------
+YDL_OPTIONS = {
+    'format': 'bestaudio',
+    'noplaylist': True
+}
+
+# ================== PLAY NEXT ==================
+def play_next(ctx):
+    if len(queue) > 0:
+        next_song = queue.pop(0)
+        ctx.voice_client.play(
+            FFmpegPCMAudio(next_song, **FFMPEG_OPTIONS),
+            after=lambda e: play_next(ctx)
+        )
+
+# ================== COMMANDS ==================
+
+# 🎵 Play
 @bot.command()
-async def join(ctx):
-    if ctx.author.voice:
-        channel = ctx.author.voice.channel
-        await channel.connect()
-        await ctx.send("🎧 دخلت الروم")
+async def play(ctx, *, search: str):
+    if ctx.author.voice is None:
+        await ctx.send("❌ لازم تكون في روم صوتي الأول!")
+        return
+
+    voice_channel = ctx.author.voice.channel
+
+    if ctx.voice_client is None:
+        await voice_channel.connect()
+
+    with YoutubeDL(YDL_OPTIONS) as ydl:
+        info = ydl.extract_info(f"ytsearch:{search}", download=False)['entries'][0]
+        url = info['url']
+        title = info['title']
+
+    queue.append(url)
+
+    if not ctx.voice_client.is_playing():
+        source = FFmpegPCMAudio(queue.pop(0), **FFMPEG_OPTIONS)
+        ctx.voice_client.play(
+            source,
+            after=lambda e: play_next(ctx)
+        )
+        await ctx.send(f"🎶 **Now Playing:** {title}")
     else:
-        await ctx.send("❌ لازم تكون في روم صوتي")
+        await ctx.send(f"✅ Added to queue: {title}")
 
-# ---------- Leave ----------
-@bot.command()
-async def leave(ctx):
-    if ctx.voice_client:
-        await ctx.voice_client.disconnect()
-        await ctx.send("👋 خرجت من الروم")
-
-# ---------- Play ----------
-@bot.command()
-async def play(ctx, *, url):
-    if not ctx.author.voice:
-        return await ctx.send("❌ ادخل روم صوتي الأول")
-
-    if not ctx.voice_client:
-        await ctx.author.voice.channel.connect()
-
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-        url2 = info['url']
-        source = await discord.FFmpegOpusAudio.from_probe(url2)
-
-        ctx.voice_client.play(source)
-        await ctx.send(f"🎶 شغال: {info['title']}")
-
-# ---------- Skip ----------
+# ⏭ Skip
 @bot.command()
 async def skip(ctx):
     if ctx.voice_client and ctx.voice_client.is_playing():
         ctx.voice_client.stop()
-        await ctx.send("⏭ تم التخطي")
+        await ctx.send("⏭️ تم تخطي الأغنية!")
+    else:
+        await ctx.send("❌ مفيش أغنية شغالة.")
 
-# ---------- Stop ----------
-@bot.command()
-async def stop(ctx):
-    if ctx.voice_client:
-        ctx.voice_client.stop()
-        await ctx.send("⏹ تم الإيقاف")
-
-# ---------- Pause ----------
+# ⏸ Pause
 @bot.command()
 async def pause(ctx):
     if ctx.voice_client and ctx.voice_client.is_playing():
         ctx.voice_client.pause()
-        await ctx.send("⏸ تم الإيقاف المؤقت")
+        await ctx.send("⏸️ تم إيقاف الأغنية مؤقتًا.")
+    else:
+        await ctx.send("❌ مفيش أغنية شغالة.")
 
-# ---------- Resume ----------
+# ▶ Resume
 @bot.command()
 async def resume(ctx):
     if ctx.voice_client and ctx.voice_client.is_paused():
         ctx.voice_client.resume()
-        await ctx.send("▶ تم الاستكمال")
+        await ctx.send("▶️ تم استكمال الأغنية.")
+    else:
+        await ctx.send("❌ مفيش أغنية متوقفة.")
 
-# ---------- Run ----------
-bot.run("PUT_YOUR_TOKEN_HERE")
+# 🛑 Stop
+@bot.command()
+async def stop(ctx):
+    if ctx.voice_client:
+        queue.clear()
+        await ctx.voice_client.disconnect()
+        await ctx.send("🛑 تم إيقاف التشغيل والخروج من الروم.")
+    else:
+        await ctx.send("❌ البوت مش في روم صوتي.")
+
+# 🏓 Ping
+@bot.command()
+async def ping(ctx):
+    latency = round(bot.latency * 1000)
+    await ctx.send(f"🏓 Pong! البينج: {latency}ms")
+
+# ================== RUN ==================
+bot.run(TOKEN)

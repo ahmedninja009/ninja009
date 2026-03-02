@@ -170,5 +170,5 @@ async def commands_list(ctx):
 # ----------------------
 # TOKEN
 # ----------------------
-token = "00"  # ضع توكن البوت هنا
+token = "DISCORD_TOKEN"  # ضع توكن البوت هنا
 bot.run(token)

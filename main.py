@@ -1,106 +1,90 @@
+# main.py
+import os
 import discord
 from discord.ext import commands
 import yt_dlp
-import os
+import asyncio
 
-intents = discord.Intents.default()
-intents.message_content = True
+intents = discord.Intents.all()
+bot = commands.Bot(command_prefix="!", intents=intents)
 
-bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
-
-# قائمة الانتظار
-queue = []
-
-ytdl_options = {
-    'format': 'bestaudio',
-    'quiet': True,
+# YT-DLP options
+ydl_opts = {
+    'format': 'bestaudio/best',
     'noplaylist': True,
+    'quiet': True,
+    'extract_flat': 'in_playlist',
+    'jsruntimes': ['node'],  # استخدام Node.js runtime
 }
 
-# ================= Commands ==================
+queues = {}  # لتخزين قوائم التشغيل لكل سيرفر
 
-@bot.event
-async def on_ready():
-    print(f"Bot جاهز: {bot.user}")
+async def play_next(ctx, guild_id):
+    if queues[guild_id]:
+        url = queues[guild_id].pop(0)
+        vc = ctx.voice_client
+        FFMPEG_OPTIONS = {
+            'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+            'options': '-vn'
+        }
+        vc.play(discord.FFmpegPCMAudio(url, **FFMPEG_OPTIONS), after=lambda e: asyncio.run_coroutine_threadsafe(play_next(ctx, guild_id), bot.loop))
+    else:
+        await ctx.voice_client.disconnect()
 
-# أمر تشغيل الأغنية أو إضافتها للقائمة
 @bot.command()
-async def play(ctx, *, query):
-    """ابعت الأغنية بالاسم أو الرابط"""
-    with yt_dlp.YoutubeDL(ytdl_options) as ydl:
-        try:
-            info = ydl.extract_info(f"ytsearch:{query}", download=False)['entries'][0]
-        except Exception:
-            await ctx.send("🙁 مفيش نتيجة للبحث")
+async def join(ctx):
+    if ctx.author.voice:
+        await ctx.author.voice.channel.connect()
+        await ctx.send("Joined the voice channel!")
+    else:
+        await ctx.send("You are not in a voice channel!")
+
+@bot.command()
+async def leave(ctx):
+    if ctx.voice_client:
+        await ctx.voice_client.disconnect()
+        await ctx.send("Left the voice channel!")
+    else:
+        await ctx.send("I'm not in a voice channel!")
+
+@bot.command()
+async def play(ctx, *, search: str):
+    if not ctx.voice_client:
+        if ctx.author.voice:
+            await ctx.author.voice.channel.connect()
+        else:
+            await ctx.send("You are not in a voice channel!")
             return
 
-    url = info['webpage_url']
-    title = info['title']
+    guild_id = ctx.guild.id
+    if guild_id not in queues:
+        queues[guild_id] = []
 
-    queue.append((title, url))
+    # البحث عن الأغنية على يوتيوب
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        try:
+            info = ydl.extract_info(f"ytsearch:{search}", download=False)['entries'][0]
+            url = info['url']
+            title = info['title']
+        except Exception as e:
+            await ctx.send(f"❌ Could not find the song: {e}")
+            return
 
-    if len(queue) == 1:
-        await ctx.send(f"🎶 شغال دلوقتي: [{title}]({url})")
+    queues[guild_id].append(url)
+    await ctx.send(f"✅ Added to queue: {title}")
+
+    if not ctx.voice_client.is_playing():
+        await play_next(ctx, guild_id)
+
+@bot.command()
+async def queue(ctx):
+    guild_id = ctx.guild.id
+    if guild_id in queues and queues[guild_id]:
+        msg = "\n".join(f"{i+1}. {q}" for i, q in enumerate(queues[guild_id]))
+        await ctx.send(f"**Queue:**\n{msg}")
     else:
-        await ctx.send(f"✅ تمت إضافة [{title}]({url}) للقائمة. **المركز في الانتظار: {len(queue)}**")
+        await ctx.send("The queue is empty.")
 
-# عرض قائمة الانتظار
-@bot.command()
-async def queue_list(ctx):
-    """عرض قائمة الانتظار"""
-    if not queue:
-        await ctx.send("القائمة فاضية 😅")
-        return
-
-    msg = "**🎵 قائمة الانتظار:**\n"
-    for i, (title, url) in enumerate(queue, start=1):
-        msg += f"{i}. [{title}]({url})\n"
-    await ctx.send(msg)
-
-# أمر تخطي أغنية
-@bot.command()
-async def skip(ctx):
-    """تخطي الأغنية الحالية"""
-    if queue:
-        skipped = queue.pop(0)
-        if queue:
-            title, url = queue[0]
-            await ctx.send(f"⏭️ تم تخطي [{skipped[0]}]. دلوقتي: [{title}]({url})")
-        else:
-            await ctx.send(f"⏹️ تم تخطي [{skipped[0]}]. مفيش أغاني تانية دلوقتي.")
-    else:
-        await ctx.send("مفيش أغاني في القائمة 😅")
-
-# أمر عرض الأغنية الحالية
-@bot.command()
-async def nowplaying(ctx):
-    """عرض الأغنية الحالية"""
-    if queue:
-        title, url = queue[0]
-        await ctx.send(f"🎧 دلوقتي شغال: [{title}]({url})")
-    else:
-        await ctx.send("مفيش أغنية شغالة دلوقتي 😅")
-
-# أمر مسح القائمة
-@bot.command()
-async def clear(ctx):
-    """مسح كل الأغاني"""
-    queue.clear()
-    await ctx.send("🗑️ تم مسح كل الأغاني والقائمة فاضية")
-
-# أمر مساعدة
-@bot.command()
-async def help(ctx):
-    msg = """
-**🎵 أوامر البوت**
-!play <اسم أو رابط> : تشغيل الأغنية أو إضافتها للقائمة
-!queue_list : عرض قائمة الانتظار
-!skip : تخطي الأغنية الحالية
-!nowplaying : عرض الأغنية الحالية
-!clear : مسح قائمة الانتظار
-"""
-    await ctx.send(msg)
-
-# ================= Token ==================
-token = os.environ.get("DISCORD_TOKEN")  # خلي التوكن سيكرت في Railway
-bot.run(token)
+# تشغيل البوت
+TOKEN = os.getenv("DISCORD_TOKEN")  # تأكد إنك ضيفت التوكن كـ Environment Variable
+bot.run(TOKEN)

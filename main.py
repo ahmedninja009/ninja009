@@ -1,144 +1,106 @@
 import discord
 from discord.ext import commands
-import asyncio
-from yt_dlp import YoutubeDL
+import yt_dlp
 import os
 
 intents = discord.Intents.default()
 intents.message_content = True
-intents.voice_states = True
 
-bot = commands.Bot(command_prefix="!", intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
+# قائمة الانتظار
 queue = []
-current = None
-is_playing = False
 
-ytdl_opts = {
-    "format": "bestaudio",
-    "quiet": True,
-    "noplaylist": True,
-    "default_search": "ytsearch"
+ytdl_options = {
+    'format': 'bestaudio',
+    'quiet': True,
+    'noplaylist': True,
 }
 
-ffmpeg_opts = {
-    "options": "-vn"
-}
+# ================= Commands ==================
 
-async def play_next(ctx):
-    global is_playing, current
-    if len(queue) == 0:
-        is_playing = False
-        current = None
-        if ctx.voice_client:
-            await ctx.voice_client.disconnect()
-        await ctx.send("خلصت القائمة 🎧")
-        return
+@bot.event
+async def on_ready():
+    print(f"Bot جاهز: {bot.user}")
 
-    is_playing = True
-    url = queue.pop(0)
-    current = url
-
-    with YoutubeDL(ytdl_opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-        stream_url = info['url']
-        title = info['title']
-
-    source = await discord.FFmpegOpusAudio.from_probe(stream_url, **ffmpeg_opts)
-    ctx.voice_client.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(ctx), bot.loop))
-    await ctx.send(f"🎶 شغال دلوقتي: **{title}**")
-
-async def search_youtube(query):
-    with YoutubeDL(ytdl_opts) as ydl:
-        info = ydl.extract_info(query, download=False)
-        if "entries" in info:
-            return info["entries"][0]["webpage_url"]
-        return info["webpage_url"]
-
-# =======================
-# Commands
-# =======================
-
-@bot.command()
-async def join(ctx):
-    if ctx.author.voice:
-        channel = ctx.author.voice.channel
-        await channel.connect()
-        await ctx.send("دخلت الروم 🎧")
-    else:
-        await ctx.send("لازم تكون في روم صوتي!")
-
+# أمر تشغيل الأغنية أو إضافتها للقائمة
 @bot.command()
 async def play(ctx, *, query):
-    if not ctx.author.voice:
-        return await ctx.send("لازم تكون في روم صوتي!")
-
-    if not ctx.voice_client:
-        await ctx.author.voice.channel.connect()
-
-    # لو النص مش رابط، نبحثه على يوتيوب
-    if not query.startswith("http"):
+    """ابعت الأغنية بالاسم أو الرابط"""
+    with yt_dlp.YoutubeDL(ytdl_options) as ydl:
         try:
-            query = await search_youtube(query)
+            info = ydl.extract_info(f"ytsearch:{query}", download=False)['entries'][0]
         except Exception:
-            return await ctx.send("مش قادر ألاقي الأغنية 😔")
+            await ctx.send("🙁 مفيش نتيجة للبحث")
+            return
 
-    queue.append(query)
-    if not ctx.voice_client.is_playing() and not is_playing:
-        await play_next(ctx)
+    url = info['webpage_url']
+    title = info['title']
+
+    queue.append((title, url))
+
+    if len(queue) == 1:
+        await ctx.send(f"🎶 شغال دلوقتي: [{title}]({url})")
     else:
-        await ctx.send("تمت إضافة الأغنية للقائمة ✅")
+        await ctx.send(f"✅ تمت إضافة [{title}]({url}) للقائمة. **المركز في الانتظار: {len(queue)}**")
 
-@bot.command()
-async def skip(ctx):
-    if ctx.voice_client and ctx.voice_client.is_playing():
-        ctx.voice_client.stop()
-        await ctx.send("تم التخطي ⏭️")
-    else:
-        await ctx.send("لا يوجد أغنية تعمل دلوقتي!")
-
-@bot.command()
-async def stop(ctx):
-    queue.clear()
-    if ctx.voice_client:
-        await ctx.voice_client.disconnect()
-        await ctx.send("تم الايقاف والخروج ⛔")
-
+# عرض قائمة الانتظار
 @bot.command()
 async def queue_list(ctx):
-    if len(queue) == 0:
+    """عرض قائمة الانتظار"""
+    if not queue:
         await ctx.send("القائمة فاضية 😅")
-    else:
-        msg = "\n".join([f"{i+1}. {q}" for i, q in enumerate(queue)])
-        await ctx.send(f"**قائمة الأغاني:**\n{msg}")
+        return
 
+    msg = "**🎵 قائمة الانتظار:**\n"
+    for i, (title, url) in enumerate(queue, start=1):
+        msg += f"{i}. [{title}]({url})\n"
+    await ctx.send(msg)
+
+# أمر تخطي أغنية
+@bot.command()
+async def skip(ctx):
+    """تخطي الأغنية الحالية"""
+    if queue:
+        skipped = queue.pop(0)
+        if queue:
+            title, url = queue[0]
+            await ctx.send(f"⏭️ تم تخطي [{skipped[0]}]. دلوقتي: [{title}]({url})")
+        else:
+            await ctx.send(f"⏹️ تم تخطي [{skipped[0]}]. مفيش أغاني تانية دلوقتي.")
+    else:
+        await ctx.send("مفيش أغاني في القائمة 😅")
+
+# أمر عرض الأغنية الحالية
 @bot.command()
 async def nowplaying(ctx):
-    if current:
-        await ctx.send(f"🎵 الآن شغال: {current}")
+    """عرض الأغنية الحالية"""
+    if queue:
+        title, url = queue[0]
+        await ctx.send(f"🎧 دلوقتي شغال: [{title}]({url})")
     else:
-        await ctx.send("لا يوجد أغنية تعمل الآن!")
+        await ctx.send("مفيش أغنية شغالة دلوقتي 😅")
 
+# أمر مسح القائمة
 @bot.command()
-async def helpme(ctx):
-    cmds = """
-**قائمة الأوامر:**
-!play <اسم أو رابط> - تشغيل الأغنية أو إضافتها للقائمة
-!skip - تخطي الأغنية الحالية
-!stop - إيقاف الأغنية والخروج
-!join - دخول الروم الصوتي
-!queue_list - عرض قائمة الأغاني
-!nowplaying - معرفة الأغنية الحالية
-!helpme - قائمة الأوامر
+async def clear(ctx):
+    """مسح كل الأغاني"""
+    queue.clear()
+    await ctx.send("🗑️ تم مسح كل الأغاني والقائمة فاضية")
+
+# أمر مساعدة
+@bot.command()
+async def help(ctx):
+    msg = """
+**🎵 أوامر البوت**
+!play <اسم أو رابط> : تشغيل الأغنية أو إضافتها للقائمة
+!queue_list : عرض قائمة الانتظار
+!skip : تخطي الأغنية الحالية
+!nowplaying : عرض الأغنية الحالية
+!clear : مسح قائمة الانتظار
 """
-    await ctx.send(cmds)
+    await ctx.send(msg)
 
-# =======================
-# Run bot
-# =======================
-
-token = os.getenv("DISCORD_TOKEN")  # سيب التوكن في Railway Secrets باسم DISCORD_TOKEN
-if not token:
-    print("❌ التوكن مش موجود في Secrets")
-else:
-    bot.run(token)
+# ================= Token ==================
+token = os.environ.get("DISCORD_TOKEN")  # خلي التوكن سيكرت في Railway
+bot.run(token)

@@ -1,17 +1,19 @@
 import os
+import asyncio
 import discord
 from discord.ext import commands
 from discord import FFmpegPCMAudio, Embed
 from yt_dlp import YoutubeDL
-import asyncio
 
 # ================== CONFIG ==================
-BOTS_CONFIG = [
+# Example configuration for multiple bots
+# كل بوت عنده token وبرفيكس
+BOT_CONFIGS = [
     {"token": os.environ.get("TOKEN1"), "prefix": "!"},
     {"token": os.environ.get("TOKEN2"), "prefix": "?"},
 ]
 
-# ================== YT & FFMPEG OPTIONS ==================
+# ================== OPTIONS ==================
 FFMPEG_OPTIONS = {
     'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
     'options': '-vn'
@@ -22,46 +24,19 @@ YDL_OPTIONS = {
     'noplaylist': True
 }
 
-# ================== CREATE BOT ==================
+# ================== BOT CREATION ==================
 def create_bot(token, prefix):
     intents = discord.Intents.default()
     intents.message_content = True
     intents.voice_states = True
 
-    bot = commands.Bot(command_prefix=prefix, intents=intents)
+    # help_command=None لحل مشكلة CommandRegistrationError مع help
+    bot = commands.Bot(command_prefix=prefix, intents=intents, help_command=None)
     bot.queue = []
-    bot.prefixes = {}  # لتخزين البرفيكس لكل سيرفر
 
-    # ===== AUTO-REACT ON COMMAND =====
-    @bot.event
-    async def on_command(ctx):
-        try:
-            await ctx.message.add_reaction("✅")
-        except:
-            pass
-
-    # ===== CHANGE PREFIX WITH MENTION =====
-    @bot.event
-    async def on_message(message):
-        if message.author.bot:
-            return
-        # تحقق من منشن للبوت لتغيير البرفيكس
-        if bot.user in message.mentions:
-            content = message.content.replace(f"<@{bot.user.id}>", "").strip()
-            if content:
-                bot.prefixes[message.guild.id] = content
-                await message.channel.send(f"✅ Prefix changed to `{content}` for this server!")
-        await bot.process_commands(message)
-
-    # لتحديد البرفيكس حسب السيرفر
-    async def get_prefix(bot_instance, message):
-        return bot.prefixes.get(message.guild.id, prefix)
-
-    bot.command_prefix = get_prefix
-
-    # ===== PLAY NEXT =====
+    # ================== PLAY NEXT ==================
     def play_next(ctx):
-        if bot.queue:
+        if len(bot.queue) > 0:
             next_song = bot.queue.pop(0)
             ctx.voice_client.play(
                 FFmpegPCMAudio(next_song['url'], **FFMPEG_OPTIONS),
@@ -73,15 +48,21 @@ def create_bot(token, prefix):
             embed.add_field(name="Duration", value=next_song['duration'], inline=True)
             asyncio.create_task(ctx.send(embed=embed))
 
-    # ===== COMMANDS =====
+    # ================== COMMANDS ==================
+
     @bot.command(name="play", aliases=["p"])
     async def play(ctx, *, search: str = None):
         if ctx.author.voice is None:
             await ctx.send("❌ You must be in a voice channel first!")
             return
-        if not search:
-            await ctx.send("💡 Play Usage:\n`play [track title]` - play track by first result\n`play [URL]` - play track by link")
-            return
+
+        if search is None:
+            return await ctx.send(
+                "💡 Play Usage:\n"
+                "`play [track title]` - play track by the first result\n"
+                "`play [URL]` - play track by provided link"
+            )
+
         voice_channel = ctx.author.voice.channel
         if ctx.voice_client is None:
             await voice_channel.connect()
@@ -142,39 +123,35 @@ def create_bot(token, prefix):
         else:
             await ctx.send("❌ Bot is not in a voice channel.")
 
-    # ===== HELP COMMAND =====
+    @bot.command(name="ping")
+    async def ping(ctx):
+        latency = round(bot.latency * 1000)
+        await ctx.send(f"🏓 Pong! Latency: {latency}ms")
+
+    # ================== HELP COMMAND ==================
     @bot.command(name="help", aliases=["h"])
     async def help_command(ctx):
-        embed = Embed(title="Bot Commands", color=0x00ff00)
-        embed.add_field(name="play [song]", value="Play a song or add to queue", inline=False)
-        embed.add_field(name="skip", value="Skip current song", inline=False)
-        embed.add_field(name="pause", value="Pause current song", inline=False)
-        embed.add_field(name="resume", value="Resume paused song", inline=False)
-        embed.add_field(name="stop", value="Stop playback and leave VC", inline=False)
-        embed.add_field(name="ping", value="Show bot latency", inline=False)
-        try:
-            await ctx.message.add_reaction("✅")
-        except:
-            pass
+        # React to the message
+        await ctx.message.add_reaction("✅")
+        # Send help in DM
+        embed = Embed(title="Help - Music Commands", color=0x00ff00)
+        embed.add_field(name="play [title|URL]", value="Play a track or add to queue", inline=False)
+        embed.add_field(name="skip", value="Skip current track", inline=False)
+        embed.add_field(name="pause", value="Pause the music", inline=False)
+        embed.add_field(name="resume", value="Resume the music", inline=False)
+        embed.add_field(name="stop", value="Stop playback and disconnect", inline=False)
+        embed.add_field(name="ping", value="Check bot latency", inline=False)
         try:
             await ctx.author.send(embed=embed)
         except:
-            await ctx.send("❌ I can't DM you. Please check your privacy settings.")
-
-    @bot.command(name="ping")
-    async def ping(ctx):
-        await ctx.send(f"🏓 Pong! Latency: {round(bot.latency*1000)}ms")
+            await ctx.send("❌ I couldn't DM you. Please check your DM settings.")
 
     return bot
 
-# ================== RUN MULTI-BOTS ==================
+# ================== RUN MULTIPLE BOTS ==================
 async def main():
-    bots = []
-    for conf in BOTS_CONFIG:
-        if conf["token"] is None:
-            raise ValueError("Please set all bot TOKENs in Environment Variables.")
-        bot_instance = create_bot(conf["token"], conf["prefix"])
-        bots.append(bot_instance)
-    await asyncio.gather(*[bot.start(conf["token"]) for bot, conf in zip(bots, BOTS_CONFIG)])
+    bots = [create_bot(conf["token"], conf["prefix"]) for conf in BOT_CONFIGS]
+    tasks = [bot_instance.start(conf["token"]) for bot_instance, conf in zip(bots, BOT_CONFIGS)]
+    await asyncio.gather(*tasks)
 
 asyncio.run(main())

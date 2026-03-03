@@ -14,7 +14,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
 
-bot = commands.Bot(command_prefix="!", intents=intents)
+bot = commands.Bot(command_prefix=commands.when_mentioned, intents=intents)
 
 # ================== QUEUE ==================
 queue = []
@@ -38,20 +38,18 @@ def play_next(ctx):
             FFmpegPCMAudio(next_song['url'], **FFMPEG_OPTIONS),
             after=lambda e: play_next(ctx)
         )
-        # رسالة اغنية جديدة
         embed = Embed(title="🎶 Now Playing", description=f"{next_song['title']}", color=0x00ff00)
-        embed.set_thumbnail(url=next_song['thumbnail'])
-        embed.add_field(name="المدة", value=next_song['duration'], inline=True)
-        embed.add_field(name="الطلب من", value=next_song['requester'], inline=True)
+        if next_song['thumbnail']:
+            embed.set_thumbnail(url=next_song['thumbnail'])
+        embed.add_field(name="Duration", value=next_song['duration'], inline=True)
         bot.loop.create_task(ctx.send(embed=embed))
 
 # ================== COMMANDS ==================
 
-# 🎵 تشغيل الأغنية
-@bot.command(name="play", aliases=["ش", "شغل"])
-async def تشغيل(ctx, *, search: str):
+@bot.command(name="شغل", aliases=["ش", "p"])
+async def play(ctx, *, search: str):
     if ctx.author.voice is None:
-        await ctx.send("❌ لازم تكون في روم صوتي الأول!")
+        await ctx.send("❌ You must be in a voice channel first!")
         return
 
     voice_channel = ctx.author.voice.channel
@@ -63,14 +61,13 @@ async def تشغيل(ctx, *, search: str):
         url = info['url']
         title = info['title']
         thumbnail = info.get('thumbnail', None)
-        duration = info.get('duration_string', "غير معروف")
+        duration = info.get('duration_string', "Unknown")
 
-    song = {"url": url, "title": title, "thumbnail": thumbnail, "duration": duration, "requester": ctx.author.mention}
+    song = {"url": url, "title": title, "thumbnail": thumbnail, "duration": duration}
 
-    # اذا فيه أغنية شغالة
     if ctx.voice_client.is_playing():
         queue.append(song)
-        await ctx.send(f"✅ تم إضافة للأنتظار: **{title}**")
+        await ctx.send(f"✅ Added to queue: **{title}**")
     else:
         ctx.voice_client.play(
             FFmpegPCMAudio(url, **FFMPEG_OPTIONS),
@@ -79,52 +76,46 @@ async def تشغيل(ctx, *, search: str):
         embed = Embed(title="🎶 Now Playing", description=f"{title}", color=0x00ff00)
         if thumbnail:
             embed.set_thumbnail(url=thumbnail)
-        embed.add_field(name="المدة", value=duration, inline=True)
-        embed.add_field(name="الطلب من", value=ctx.author.mention, inline=True)
+        embed.add_field(name="Duration", value=duration, inline=True)
         await ctx.send(embed=embed)
 
-# ⏭ تخطي
-@bot.command(name="skip", aliases=["ت", "تخطي"])
-async def تخطي(ctx):
+@bot.command(name="skip", aliases=["تخطي", "s"])
+async def skip(ctx):
     if ctx.voice_client and ctx.voice_client.is_playing():
         ctx.voice_client.stop()
-        await ctx.send("⏭️ تم تخطي الأغنية!")
+        await ctx.send("⏭️ Song skipped!")
     else:
-        await ctx.send("❌ مفيش أغنية شغالة.")
+        await ctx.send("❌ No song is playing.")
 
-# ⏸ إيقاف مؤقت
-@bot.command(name="pause", aliases=["و", "وقف"])
-async def إيقاف(ctx):
+@bot.command(name="pause", aliases=["ايقاف", "pa"])
+async def pause(ctx):
     if ctx.voice_client and ctx.voice_client.is_playing():
         ctx.voice_client.pause()
-        await ctx.send("⏸️ تم إيقاف الأغنية مؤقتًا.")
+        await ctx.send("⏸️ Song paused.")
     else:
-        await ctx.send("❌ مفيش أغنية شغالة.")
+        await ctx.send("❌ No song is playing.")
 
-# ▶ استكمال
-@bot.command(name="resume", aliases=["ر", "كمل"])
-async def استكمال(ctx):
+@bot.command(name="resume", aliases=["كمل", "r"])
+async def resume(ctx):
     if ctx.voice_client and ctx.voice_client.is_paused():
         ctx.voice_client.resume()
-        await ctx.send("▶️ تم استكمال الأغنية.")
+        await ctx.send("▶️ Song resumed.")
     else:
-        await ctx.send("❌ مفيش أغنية متوقفة.")
+        await ctx.send("❌ No song is paused.")
 
-# 🛑 إيقاف نهائي
-@bot.command(name="stop", aliases=["u", "ايقاف"])
-async def إيقاف_كلي(ctx):
+@bot.command(name="stop", aliases=["اوقف", "st"])
+async def stop(ctx):
     if ctx.voice_client:
         queue.clear()
         await ctx.voice_client.disconnect()
-        await ctx.send("🛑 تم إيقاف التشغيل والخروج من الروم.")
+        await ctx.send("🛑 Playback stopped and disconnected.")
     else:
-        await ctx.send("❌ البوت مش في روم صوتي.")
+        await ctx.send("❌ Bot is not in a voice channel.")
 
-# 🏓 بينج
-@bot.command(name="ping", aliases=["بنج", "بينج"])
-async def بينج(ctx):
+@bot.command(name="ping", aliases=["بينج"])
+async def ping(ctx):
     latency = round(bot.latency * 1000)
-    await ctx.send(f"🏓 Pong! البينج: {latency}ms")
+    await ctx.send(f"🏓 Pong! Latency: {latency}ms")
 
 # ================== RUN ==================
 bot.run(TOKEN)

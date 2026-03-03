@@ -35,17 +35,36 @@ def create_bot(token, prefix):
 
     # ------------------ PLAY NEXT ------------------
     def play_next(ctx):
-        if len(queue) > 0:
-            next_song = queue.pop(0)
-            ctx.voice_client.play(
-                FFmpegPCMAudio(next_song['url'], **FFMPEG_OPTIONS),
-                after=lambda e: play_next(ctx)
-            )
-            embed = Embed(title="🎶 Now Playing", description=f"{next_song['title']}", color=0x00ff00)
-            if next_song['thumbnail']:
-                embed.set_thumbnail(url=next_song['thumbnail'])
-            embed.add_field(name="Duration", value=next_song['duration'], inline=True)
-            bot.loop.create_task(ctx.send(embed=embed))
+    if len(queue) > 0:
+        next_song = queue.pop(0)
+
+        def after_play(error):
+            if error:
+                print(f"Playback error: {error}")
+                return
+            bot.loop.create_task(play_next_async(ctx))
+
+        ctx.voice_client.play(
+            FFmpegPCMAudio(next_song['url'], **FFMPEG_OPTIONS),
+            after=after_play
+        )
+
+        embed = Embed(
+            title="🎶 Now Playing",
+            description=f"{next_song['title']}",
+            color=0x00ff00
+        )
+
+        if next_song['thumbnail']:
+            embed.set_thumbnail(url=next_song['thumbnail'])
+
+        embed.add_field(name="Duration", value=next_song['duration'], inline=True)
+        bot.loop.create_task(ctx.send(embed=embed))
+
+
+async def play_next_async(ctx):
+    await asyncio.sleep(1)
+    play_next(ctx)
 
     # ------------------ COMMANDS ------------------
 

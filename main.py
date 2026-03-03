@@ -48,7 +48,7 @@ def play_next(ctx):
 # ================== COMMANDS ==================
 
 # 🎵 تشغيل الأغنية
-@bot.command(name="تشغيل", aliases=["ش", "play"])
+@bot.command(name="play", aliases=["ش", "شغل"])
 async def تشغيل(ctx, *, search: str):
     if ctx.author.voice is None:
         await ctx.send("❌ لازم تكون في روم صوتي الأول!")
@@ -84,7 +84,7 @@ async def تشغيل(ctx, *, search: str):
         await ctx.send(embed=embed)
 
 # ⏭ تخطي
-@bot.command(name="تخطي", aliases=["skip", "تخطي"])
+@bot.command(name="skip", aliases=["ت", "تخطي"])
 async def تخطي(ctx):
     if ctx.voice_client and ctx.voice_client.is_playing():
         ctx.voice_client.stop()
@@ -93,7 +93,7 @@ async def تخطي(ctx):
         await ctx.send("❌ مفيش أغنية شغالة.")
 
 # ⏸ إيقاف مؤقت
-@bot.command(name="إيقاف", aliases=["pause", "وقف"])
+@bot.command(name="pause", aliases=["و", "وقف"])
 async def إيقاف(ctx):
     if ctx.voice_client and ctx.voice_client.is_playing():
         ctx.voice_client.pause()
@@ -102,7 +102,7 @@ async def إيقاف(ctx):
         await ctx.send("❌ مفيش أغنية شغالة.")
 
 # ▶ استكمال
-@bot.command(name="استكمال", aliases=["resume", "كمل"])
+@bot.command(name="resume", aliases=["ر", "كمل"])
 async def استكمال(ctx):
     if ctx.voice_client and ctx.voice_client.is_paused():
         ctx.voice_client.resume()
@@ -111,7 +111,7 @@ async def استكمال(ctx):
         await ctx.send("❌ مفيش أغنية متوقفة.")
 
 # 🛑 إيقاف نهائي
-@bot.command(name="إيقاف_كلي", aliases=["stop", "ايقاف"])
+@bot.command(name="stop", aliases=["u", "ايقاف"])
 async def إيقاف_كلي(ctx):
     if ctx.voice_client:
         queue.clear()
@@ -121,7 +121,7 @@ async def إيقاف_كلي(ctx):
         await ctx.send("❌ البوت مش في روم صوتي.")
 
 # 🏓 بينج
-@bot.command(name="بينج", aliases=["ping", "بينج"])
+@bot.command(name="ping", aliases=["بنج", "بينج"])
 async def بينج(ctx):
     latency = round(bot.latency * 1000)
     await ctx.send(f"🏓 Pong! البينج: {latency}ms")

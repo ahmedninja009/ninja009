@@ -6,11 +6,9 @@ from yt_dlp import YoutubeDL
 import asyncio
 
 # ================== CONFIG ==================
-# هنا تحط كل التوكنات والبرفكسات لكل بوت
 CONFIGS = [
     {"token": os.environ.get("TOKEN1"), "prefix": "!"},
     {"token": os.environ.get("TOKEN2"), "prefix": "#"},
-    # اضيف المزيد لو تحب
 ]
 
 # ================== GLOBAL OPTIONS ==================
@@ -133,11 +131,13 @@ def create_bot(token, prefix):
     if "help" not in bot.all_commands:
         @bot.command(name="help", aliases=["h"])
         async def help_command(ctx):
+
             embed = Embed(
                 title="📜 Bot Commands",
                 description="Here is a list of available commands:",
                 color=0x00ff00
             )
+
             embed.add_field(
                 name="🎵 Music Commands",
                 value="`play [title/URL]` - play a track\n"
@@ -147,32 +147,41 @@ def create_bot(token, prefix):
                       "`stop` - stop playback",
                 inline=False
             )
+
             embed.add_field(
                 name="🏓 Utility",
                 value="`ping` - check bot latency\n"
                       "`help` - show this message",
                 inline=False
             )
-            embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.avatar.url if ctx.author.avatar else None)
+
+            embed.set_footer(
+                text=f"Requested by {ctx.author}",
+                icon_url=ctx.author.display_avatar.url
+            )
 
             try:
-                await ctx.author.send(embed=embed)
+                dm = await ctx.author.create_dm()
+                await dm.send(embed=embed)
                 await ctx.message.add_reaction("📬")
+            except discord.Forbidden:
+                await ctx.send("❌ افتح الخاص بتاعك من السيرفر علشان أقدر أبعتلك الهيلب.")
             except:
-                await ctx.send("❌ I couldn't DM you the help message.")
+                await ctx.send("❌ حصل خطأ أثناء إرسال الرسالة الخاصة.")
 
     # ------------------ CHANGE PREFIX VIA MENTION ------------------
     @bot.event
     async def on_message(message):
         if message.author.bot:
             return
-        # Mention bot to change prefix
+
         if bot.user.mentioned_in(message):
             parts = message.content.split()
             if len(parts) >= 2:
                 new_prefix = parts[1]
                 bot.command_prefix = new_prefix
                 await message.channel.send(f"✅ Prefix changed to: {new_prefix}")
+
         await bot.process_commands(message)
 
     # ------------------ REACT ON COMMAND ------------------
@@ -183,10 +192,8 @@ def create_bot(token, prefix):
         except:
             pass
 
-    # ------------------ RESPOND TO IMAGE ------------------
     @bot.event
     async def on_message_edit(before, after):
-        # ممكن تضيف ردود على الصور هنا
         pass
 
     return bot, token

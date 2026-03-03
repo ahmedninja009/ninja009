@@ -14,7 +14,8 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
 
-bot = commands.Bot(command_prefix="!", intents=intents)
+# Disable default help to create custom one
+bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
 # ================== QUEUE ==================
 queue = []
@@ -47,7 +48,7 @@ def play_next(ctx):
 # ================== COMMANDS ==================
 
 # 🎵 Play
-@bot.command(name="play", aliases=["ش", "شغل", "p"])
+@bot.command(name="شغل", aliases=["ش", "p"])
 async def play(ctx, *, search: str):
     if ctx.author.voice is None:
         await ctx.send("❌ You must be in a voice channel first!")
@@ -81,7 +82,7 @@ async def play(ctx, *, search: str):
         await ctx.send(embed=embed)
 
 # ⏭ Skip
-@bot.command(name="skip", aliases=["تخطي", "s", "ت"])
+@bot.command(name="skip", aliases=["تخطي", "s"])
 async def skip(ctx):
     if ctx.voice_client and ctx.voice_client.is_playing():
         ctx.voice_client.stop()
@@ -90,7 +91,7 @@ async def skip(ctx):
         await ctx.send("❌ No song is playing.")
 
 # ⏸ Pause
-@bot.command(name="pause", aliases=["ايقاف", "pa", "وقف"])
+@bot.command(name="pause", aliases=["ايقاف", "pa"])
 async def pause(ctx):
     if ctx.voice_client and ctx.voice_client.is_playing():
         ctx.voice_client.pause()
@@ -123,22 +124,24 @@ async def ping(ctx):
     latency = round(bot.latency * 1000)
     await ctx.send(f"🏓 Pong! Latency: {latency}ms")
 
-# 📜 Help with reaction and DM
+# ℹ️ Custom Help
 @bot.command(name="help", aliases=["هلب", "مساعدة"])
 async def help_command(ctx):
+    # React to user's command
+    await ctx.message.add_reaction("✅")
+
+    embed = Embed(title="Music Bot Commands", color=0x00ff00)
+    embed.add_field(name="!شغل <song>", value="Play a song or add to queue", inline=False)
+    embed.add_field(name="!تخطي", value="Skip the current song", inline=False)
+    embed.add_field(name="!ايقاف", value="Pause the current song", inline=False)
+    embed.add_field(name="!كمل", value="Resume the paused song", inline=False)
+    embed.add_field(name="!اوقف", value="Stop playback and disconnect", inline=False)
+    embed.add_field(name="!ping", value="Check bot latency", inline=False)
+
     try:
-        await ctx.message.add_reaction("✅")
-        embed = Embed(title="📜 Bot Commands", color=0x00ff00)
-        embed.add_field(name="!play <song>", value="Play a song or add to queue", inline=False)
-        embed.add_field(name="!skip", value="Skip the current song", inline=False)
-        embed.add_field(name="!pause", value="Pause the current song", inline=False)
-        embed.add_field(name="!resume", value="Resume the paused song", inline=False)
-        embed.add_field(name="!stop", value="Stop playing and leave channel", inline=False)
-        embed.add_field(name="!ping", value="Check bot latency", inline=False)
-        embed.add_field(name="!help", value="Show this help menu", inline=False)
         await ctx.author.send(embed=embed)
-    except discord.Forbidden:
-        await ctx.send("❌ I can't send you a DM. Please enable DMs from server members.")
+    except:
+        await ctx.send("❌ Can't send you a DM. Please check your privacy settings.")
 
 # ================== RUN ==================
 bot.run(TOKEN)

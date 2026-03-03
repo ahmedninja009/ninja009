@@ -14,8 +14,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
 
-# Disable default help to create custom one
-bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ================== QUEUE ==================
 queue = []
@@ -47,9 +46,9 @@ def play_next(ctx):
 
 # ================== COMMANDS ==================
 
-# 🎵 Play
+# 🎵 تشغيل الأغنية
 @bot.command(name="شغل", aliases=["ش", "p"])
-async def play(ctx, *, search: str):
+async def play(ctx, *, search: str = None):
     if ctx.author.voice is None:
         await ctx.send("❌ You must be in a voice channel first!")
         return
@@ -57,6 +56,15 @@ async def play(ctx, *, search: str):
     voice_channel = ctx.author.voice.channel
     if ctx.voice_client is None:
         await voice_channel.connect()
+
+    if not search:
+        await ctx.send(
+            "💡 Play Usage:\n"
+            "play [track title] - play track by the first result\n"
+            "play [URL] - play track by provided link"
+        )
+        await ctx.message.add_reaction("✅")
+        return
 
     with YoutubeDL(YDL_OPTIONS) as ydl:
         info = ydl.extract_info(f"ytsearch:{search}", download=False)['entries'][0]
@@ -70,6 +78,7 @@ async def play(ctx, *, search: str):
     if ctx.voice_client.is_playing():
         queue.append(song)
         await ctx.send(f"✅ Added to queue: **{title}**")
+        await ctx.message.add_reaction("✅")
     else:
         ctx.voice_client.play(
             FFmpegPCMAudio(url, **FFMPEG_OPTIONS),
@@ -80,68 +89,55 @@ async def play(ctx, *, search: str):
             embed.set_thumbnail(url=thumbnail)
         embed.add_field(name="Duration", value=duration, inline=True)
         await ctx.send(embed=embed)
+        await ctx.message.add_reaction("✅")
 
-# ⏭ Skip
+# ⏭ تخطي
 @bot.command(name="skip", aliases=["تخطي", "s"])
 async def skip(ctx):
     if ctx.voice_client and ctx.voice_client.is_playing():
         ctx.voice_client.stop()
         await ctx.send("⏭️ Song skipped!")
+        await ctx.message.add_reaction("✅")
     else:
         await ctx.send("❌ No song is playing.")
 
-# ⏸ Pause
+# ⏸ إيقاف مؤقت
 @bot.command(name="pause", aliases=["ايقاف", "pa"])
 async def pause(ctx):
     if ctx.voice_client and ctx.voice_client.is_playing():
         ctx.voice_client.pause()
         await ctx.send("⏸️ Song paused.")
+        await ctx.message.add_reaction("✅")
     else:
         await ctx.send("❌ No song is playing.")
 
-# ▶ Resume
+# ▶ استكمال
 @bot.command(name="resume", aliases=["كمل", "r"])
 async def resume(ctx):
     if ctx.voice_client and ctx.voice_client.is_paused():
         ctx.voice_client.resume()
         await ctx.send("▶️ Song resumed.")
+        await ctx.message.add_reaction("✅")
     else:
         await ctx.send("❌ No song is paused.")
 
-# 🛑 Stop
+# 🛑 إيقاف نهائي
 @bot.command(name="stop", aliases=["اوقف", "st"])
 async def stop(ctx):
     if ctx.voice_client:
         queue.clear()
         await ctx.voice_client.disconnect()
         await ctx.send("🛑 Playback stopped and disconnected.")
+        await ctx.message.add_reaction("✅")
     else:
         await ctx.send("❌ Bot is not in a voice channel.")
 
-# 🏓 Ping
+# 🏓 بينج
 @bot.command(name="ping", aliases=["بينج"])
 async def ping(ctx):
     latency = round(bot.latency * 1000)
     await ctx.send(f"🏓 Pong! Latency: {latency}ms")
-
-# ℹ️ Custom Help
-@bot.command(name="help", aliases=["هلب", "مساعدة"])
-async def help_command(ctx):
-    # React to user's command
     await ctx.message.add_reaction("✅")
-
-    embed = Embed(title="Music Bot Commands", color=0x00ff00)
-    embed.add_field(name="!شغل <song>", value="Play a song or add to queue", inline=False)
-    embed.add_field(name="!تخطي", value="Skip the current song", inline=False)
-    embed.add_field(name="!ايقاف", value="Pause the current song", inline=False)
-    embed.add_field(name="!كمل", value="Resume the paused song", inline=False)
-    embed.add_field(name="!اوقف", value="Stop playback and disconnect", inline=False)
-    embed.add_field(name="!ping", value="Check bot latency", inline=False)
-
-    try:
-        await ctx.author.send(embed=embed)
-    except:
-        await ctx.send("❌ Can't send you a DM. Please check your privacy settings.")
 
 # ================== RUN ==================
 bot.run(TOKEN)

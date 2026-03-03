@@ -18,7 +18,7 @@ FFMPEG_OPTIONS = {
 }
 
 YDL_OPTIONS = {
-    'format': 'bestaudio',
+    'format': 'bestaudio[ext=webm]/bestaudio/best',
     'noplaylist': True
 }
 

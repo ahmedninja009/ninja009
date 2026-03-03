@@ -1,7 +1,7 @@
 import os
 import discord
 from discord.ext import commands
-from discord import FFmpegPCMAudio
+from discord import FFmpegPCMAudio, Embed
 from yt_dlp import YoutubeDL
 
 # ================== TOKEN ==================
@@ -16,10 +16,8 @@ intents.voice_states = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ================== QUEUE SYSTEM ==================
+# ================== QUEUE ==================
 queue = []
-current_song = None
-current_data = None
 
 # ================== OPTIONS ==================
 FFMPEG_OPTIONS = {
@@ -32,170 +30,101 @@ YDL_OPTIONS = {
     'noplaylist': True
 }
 
-# ================== FORMAT DURATION ==================
-def format_duration(seconds):
-    minutes = seconds // 60
-    seconds = seconds % 60
-    return f"{minutes}:{seconds:02d}"
-
-# ================== PLAY FUNCTIONS ==================
-async def start_playing(ctx, data):
-    global current_song, current_data
-
-    current_song = data["url"]
-    current_data = data
-
-    ctx.voice_client.play(
-        FFmpegPCMAudio(data["url"], **FFMPEG_OPTIONS),
-        after=lambda e: bot.loop.create_task(play_next(ctx))
-    )
-
-    embed = discord.Embed(
-        title="🎶 الآن شغّال",
-        description=f"[{data['title']}]({data['webpage_url']})",
-        color=discord.Color.green()
-    )
-    embed.add_field(name="⏱ المدة", value=format_duration(data["duration"]), inline=True)
-    embed.add_field(name="👤 بواسطة", value=data["requester"].mention, inline=True)
-    embed.set_thumbnail(url=data["thumbnail"])
-    embed.set_footer(text=f"السيرفر: {ctx.guild.name}")
-
-    await ctx.send(embed=embed)
-
-async def play_next(ctx):
-    global current_song, current_data
+# ================== PLAY NEXT ==================
+def play_next(ctx):
     if len(queue) > 0:
-        data = queue.pop(0)
-        await start_playing(ctx, data)
-    else:
-        current_song = None
-        current_data = None
-        embed = discord.Embed(
-            title="📭 انتهى الكيو",
-            description="مفيش أغاني تاني.",
-            color=discord.Color.red()
+        next_song = queue.pop(0)
+        ctx.voice_client.play(
+            FFmpegPCMAudio(next_song['url'], **FFMPEG_OPTIONS),
+            after=lambda e: play_next(ctx)
         )
-        await ctx.send(embed=embed)
+        # رسالة اغنية جديدة
+        embed = Embed(title="🎶 Now Playing", description=f"{next_song['title']}", color=0x00ff00)
+        embed.set_thumbnail(url=next_song['thumbnail'])
+        embed.add_field(name="المدة", value=next_song['duration'], inline=True)
+        embed.add_field(name="الطلب من", value=next_song['requester'], inline=True)
+        bot.loop.create_task(ctx.send(embed=embed))
 
 # ================== COMMANDS ==================
 
-# تشغيل
-@bot.command(aliases=["play", "ش", "شغل"])
-async def شغل(ctx, *, search: str):
+# 🎵 تشغيل الأغنية
+@bot.command(name="تشغيل", aliases=["ش", "play"])
+async def تشغيل(ctx, *, search: str):
     if ctx.author.voice is None:
-        return await ctx.send("❌ لازم تكون في روم صوتي الأول!")
+        await ctx.send("❌ لازم تكون في روم صوتي الأول!")
+        return
 
+    voice_channel = ctx.author.voice.channel
     if ctx.voice_client is None:
-        await ctx.author.voice.channel.connect()
+        await voice_channel.connect()
 
     with YoutubeDL(YDL_OPTIONS) as ydl:
         info = ydl.extract_info(f"ytsearch:{search}", download=False)['entries'][0]
-        data = {
-            "url": info["url"],
-            "title": info["title"],
-            "duration": info["duration"],
-            "thumbnail": info["thumbnail"],
-            "webpage_url": info["webpage_url"],
-            "requester": ctx.author
-        }
+        url = info['url']
+        title = info['title']
+        thumbnail = info.get('thumbnail', None)
+        duration = info.get('duration_string', "غير معروف")
 
+    song = {"url": url, "title": title, "thumbnail": thumbnail, "duration": duration, "requester": ctx.author.mention}
+
+    # اذا فيه أغنية شغالة
     if ctx.voice_client.is_playing():
-        queue.append(data)
-        embed = discord.Embed(
-            title="✅ تم الإضافة للكيو",
-            description=f"[{data['title']}]({data['webpage_url']})",
-            color=discord.Color.orange()
-        )
-        embed.add_field(name="⏱ المدة", value=format_duration(data["duration"]), inline=True)
-        embed.add_field(name="👤 بواسطة", value=ctx.author.mention, inline=True)
-        embed.set_thumbnail(url=data["thumbnail"])
-        await ctx.send(embed=embed)
+        queue.append(song)
+        await ctx.send(f"✅ تم إضافة للأنتظار: **{title}**")
     else:
-        await start_playing(ctx, data)
+        ctx.voice_client.play(
+            FFmpegPCMAudio(url, **FFMPEG_OPTIONS),
+            after=lambda e: play_next(ctx)
+        )
+        embed = Embed(title="🎶 Now Playing", description=f"{title}", color=0x00ff00)
+        if thumbnail:
+            embed.set_thumbnail(url=thumbnail)
+        embed.add_field(name="المدة", value=duration, inline=True)
+        embed.add_field(name="الطلب من", value=ctx.author.mention, inline=True)
+        await ctx.send(embed=embed)
 
-# تخطي
-@bot.command(aliases=["skip", "تخطي", "تخطى"])
+# ⏭ تخطي
+@bot.command(name="تخطي", aliases=["skip", "تخطي"])
 async def تخطي(ctx):
     if ctx.voice_client and ctx.voice_client.is_playing():
-        embed = discord.Embed(
-            title="⏭ تم التخطي",
-            description=f"تم تخطي: **{current_data['title']}**",
-            color=discord.Color.orange()
-        )
-        await ctx.send(embed=embed)
         ctx.voice_client.stop()
+        await ctx.send("⏭️ تم تخطي الأغنية!")
     else:
         await ctx.send("❌ مفيش أغنية شغالة.")
 
-# إيقاف
-@bot.command(aliases=["stop", "ايقاف", "أوقف"])
+# ⏸ إيقاف مؤقت
+@bot.command(name="إيقاف", aliases=["pause", "وقف"])
 async def إيقاف(ctx):
-    global current_song, current_data
-    if ctx.voice_client:
-        queue.clear()
-        current_song = None
-        current_data = None
-        await ctx.voice_client.disconnect()
-        await ctx.send("🛑 تم إيقاف التشغيل والخروج من الروم.")
-
-# إيقاف مؤقت
-@bot.command(aliases=["pause", "ايقاف_مؤقت", "وقف"])
-async def وقف(ctx):
     if ctx.voice_client and ctx.voice_client.is_playing():
         ctx.voice_client.pause()
-        await ctx.send("⏸ تم إيقاف الأغنية مؤقتًا.")
+        await ctx.send("⏸️ تم إيقاف الأغنية مؤقتًا.")
     else:
         await ctx.send("❌ مفيش أغنية شغالة.")
 
-# استكمال
-@bot.command(aliases=["resume", "استكمال", "كمل"])
-async def كمل(ctx):
+# ▶ استكمال
+@bot.command(name="استكمال", aliases=["resume", "كمل"])
+async def استكمال(ctx):
     if ctx.voice_client and ctx.voice_client.is_paused():
         ctx.voice_client.resume()
         await ctx.send("▶️ تم استكمال الأغنية.")
     else:
         await ctx.send("❌ مفيش أغنية متوقفة.")
 
-# قائمة الكيو
-@bot.command(aliases=["queue", "الكيو", "قائمة"])
-async def القائمة(ctx):
-    if not queue:
-        return await ctx.send("📭 الكيو فاضي.")
-
-    embed = discord.Embed(title="📜 الكيو الحالي", color=discord.Color.blue())
-    for i, song in enumerate(queue, start=1):
-        embed.add_field(
-            name=f"{i}. {song['title']}",
-            value=f"⏱ {format_duration(song['duration'])} | 👤 {song['requester'].mention}",
-            inline=False
-        )
-    await ctx.send(embed=embed)
-
-# الآن شغال
-@bot.command(aliases=["now", "الآن", "شغال"])
-async def الآن(ctx):
-    if current_data:
-        embed = discord.Embed(
-            title="🎵 الآن شغّال",
-            description=f"[{current_data['title']}]({current_data['webpage_url']})",
-            color=discord.Color.green()
-        )
-        embed.add_field(name="⏱ المدة", value=format_duration(current_data["duration"]), inline=True)
-        embed.add_field(name="👤 بواسطة", value=current_data["requester"].mention, inline=True)
-        embed.set_thumbnail(url=current_data["thumbnail"])
-        await ctx.send(embed=embed)
+# 🛑 إيقاف نهائي
+@bot.command(name="إيقاف_كلي", aliases=["stop", "ايقاف"])
+async def إيقاف_كلي(ctx):
+    if ctx.voice_client:
+        queue.clear()
+        await ctx.voice_client.disconnect()
+        await ctx.send("🛑 تم إيقاف التشغيل والخروج من الروم.")
     else:
-        await ctx.send("❌ مفيش حاجة شغالة.")
+        await ctx.send("❌ البوت مش في روم صوتي.")
 
-# بينج
-@bot.command(aliases=["ping", "بينج"])
+# 🏓 بينج
+@bot.command(name="بينج", aliases=["ping", "بينج"])
 async def بينج(ctx):
     latency = round(bot.latency * 1000)
-    embed = discord.Embed(
-        title="🏓 Pong!",
-        description=f"Latency: **{latency}ms**",
-        color=discord.Color.blurple()
-    )
-    await ctx.send(embed=embed)
+    await ctx.send(f"🏓 Pong! البينج: {latency}ms")
 
+# ================== RUN ==================
 bot.run(TOKEN)

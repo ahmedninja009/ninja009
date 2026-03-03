@@ -6,11 +6,9 @@ from yt_dlp import YoutubeDL
 import asyncio
 
 # ================== CONFIG ==================
-# ضع هنا التوكنات والبرفيكسات لكل بوت
 BOTS_CONFIG = [
     {"token": os.environ.get("TOKEN1"), "prefix": "!"},
     {"token": os.environ.get("TOKEN2"), "prefix": "?"},
-    # ممكن تضيف أكتر
 ]
 
 # ================== YT & FFMPEG OPTIONS ==================
@@ -31,35 +29,31 @@ def create_bot(token, prefix):
     intents.voice_states = True
 
     bot = commands.Bot(command_prefix=prefix, intents=intents)
-
-    # ================ QUEUE ================
     bot.queue = []
 
-    # ================ PLAY NEXT ================
+    # ===== PLAY NEXT =====
     def play_next(ctx):
-        if len(bot.queue) > 0:
+        if bot.queue:
             next_song = bot.queue.pop(0)
             ctx.voice_client.play(
                 FFmpegPCMAudio(next_song['url'], **FFMPEG_OPTIONS),
                 after=lambda e: play_next(ctx)
             )
-            embed = Embed(title="🎶 Now Playing", description=f"{next_song['title']}", color=0x00ff00)
+            embed = Embed(title="🎶 Now Playing", description=next_song['title'], color=0x00ff00)
             if next_song['thumbnail']:
                 embed.set_thumbnail(url=next_song['thumbnail'])
             embed.add_field(name="Duration", value=next_song['duration'], inline=True)
             asyncio.create_task(ctx.send(embed=embed))
 
-    # ================ COMMANDS ================
+    # ===== COMMANDS =====
     @bot.command(name="play", aliases=["p"])
     async def play(ctx, *, search: str = None):
         if ctx.author.voice is None:
             await ctx.send("❌ You must be in a voice channel first!")
             return
-
-        if search is None:
+        if not search:
             await ctx.send("💡 Play Usage:\n`play [track title]` - play track by first result\n`play [URL]` - play track by link")
             return
-
         voice_channel = ctx.author.voice.channel
         if ctx.voice_client is None:
             await voice_channel.connect()
@@ -81,7 +75,7 @@ def create_bot(token, prefix):
                 FFmpegPCMAudio(url, **FFMPEG_OPTIONS),
                 after=lambda e: play_next(ctx)
             )
-            embed = Embed(title="🎶 Now Playing", description=f"{title}", color=0x00ff00)
+            embed = Embed(title="🎶 Now Playing", description=title, color=0x00ff00)
             if thumbnail:
                 embed.set_thumbnail(url=thumbnail)
             embed.add_field(name="Duration", value=duration, inline=True)
@@ -122,20 +116,18 @@ def create_bot(token, prefix):
 
     @bot.command(name="ping")
     async def ping(ctx):
-        latency = round(bot.latency * 1000)
-        await ctx.send(f"🏓 Pong! Latency: {latency}ms")
+        await ctx.send(f"🏓 Pong! Latency: {round(bot.latency*1000)}ms")
 
     return bot
 
 # ================== RUN MULTI-BOTS ==================
-bots = []
-for conf in BOTS_CONFIG:
-    if conf["token"] is None:
-        raise ValueError("Please set all bot TOKENs in Environment Variables.")
-    bot_instance = create_bot(conf["token"], conf["prefix"])
-    bots.append(bot_instance)
+async def main():
+    bots = []
+    for conf in BOTS_CONFIG:
+        if conf["token"] is None:
+            raise ValueError("Please set all bot TOKENs in Environment Variables.")
+        bot_instance = create_bot(conf["token"], conf["prefix"])
+        bots.append(bot_instance)
+    await asyncio.gather(*[bot.start(conf["token"]) for bot, conf in zip(bots, BOTS_CONFIG)])
 
-# Run all bots concurrently
-loop = asyncio.get_event_loop()
-tasks = [bot.start(bot_instance.http.token) for bot_instance in bots]
-loop.run_until_complete(asyncio.gather(*tasks))
+asyncio.run(main())

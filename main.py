@@ -2,8 +2,8 @@ import os
 import discord
 from discord.ext import commands
 from discord import FFmpegPCMAudio, Embed
-from yt_dlp import YoutubeDL
 import asyncio
+from youtubesearchpython import VideosSearch
 
 # ================== CONFIG ==================
 CONFIGS = [
@@ -14,12 +14,7 @@ CONFIGS = [
 # ================== GLOBAL OPTIONS ==================
 FFMPEG_OPTIONS = {
     'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-    'options': '-vn'
-}
-
-YDL_OPTIONS = {
-    'format': 'bestaudio[ext=webm]/bestaudio/best',
-    'noplaylist': True
+    'options': '-vn -ar 22050 -b:a 64k'
 }
 
 # ================== BOT CREATOR ==================
@@ -27,23 +22,20 @@ def create_bot(token, prefix):
     intents = discord.Intents.default()
     intents.message_content = True
     intents.voice_states = True
-    
-    # 🔥 تم تعطيل الهيلب الافتراضي هنا
     bot = commands.Bot(command_prefix=prefix, intents=intents, help_command=None)
-    
     queue = []
 
-       # ------------------ PLAY NEXT ------------------
+    # ------------------ PLAY NEXT ------------------
     def play_next(ctx):
         if len(queue) > 0:
             next_song = queue.pop(0)
-
+            
             def after_play(error):
                 if error:
                     print(f"Playback error: {error}")
                     return
                 bot.loop.create_task(play_next_async(ctx))
-
+            
             ctx.voice_client.play(
                 FFmpegPCMAudio(next_song['url'], **FFMPEG_OPTIONS),
                 after=after_play
@@ -54,20 +46,15 @@ def create_bot(token, prefix):
                 description=f"{next_song['title']}",
                 color=0x00ff00
             )
-
-            if next_song['thumbnail']:
-                embed.set_thumbnail(url=next_song['thumbnail'])
-
             embed.add_field(name="Duration", value=next_song['duration'], inline=True)
             bot.loop.create_task(ctx.send(embed=embed))
 
-
     async def play_next_async(ctx):
         await asyncio.sleep(1)
-        play_next(ctx)
+        if ctx.voice_client:
+            play_next(ctx)
 
     # ------------------ COMMANDS ------------------
-
     @bot.command(name="play", aliases=["ش", "شغل", "p"])
     async def play(ctx, *, query=None):
         if ctx.author.voice is None:
@@ -79,17 +66,17 @@ def create_bot(token, prefix):
             await voice_channel.connect()
 
         if not query:
-            await ctx.send("💡 Play Usage:\nplay [track title] - play track by first result\nplay [URL] - play track by link")
+            await ctx.send("💡 Play Usage:\nplay [track title] - play track by first result")
             return
 
-        with YoutubeDL(YDL_OPTIONS) as ydl:
-            info = ydl.extract_info(f"ytsearch:{query}", download=False)['entries'][0]
-            url = info['url']
-            title = info['title']
-            thumbnail = info.get('thumbnail', None)
-            duration = info.get('duration_string', "Unknown")
+        # ------------------ البحث عن الفيديو ------------------
+        videosSearch = VideosSearch(query, limit=1)
+        result = videosSearch.result()['result'][0]
+        url = result['link']
+        title = result['title']
+        duration = result.get('duration', "Unknown")
 
-        song = {"url": url, "title": title, "thumbnail": thumbnail, "duration": duration}
+        song = {"url": url, "title": title, "duration": duration}
 
         if ctx.voice_client.is_playing():
             queue.append(song)
@@ -97,11 +84,9 @@ def create_bot(token, prefix):
         else:
             ctx.voice_client.play(
                 FFmpegPCMAudio(url, **FFMPEG_OPTIONS),
-                after=lambda e: play_next(ctx)
+                after=lambda e: bot.loop.create_task(play_next_async(ctx))
             )
             embed = Embed(title="🎶 Now Playing", description=f"{title}", color=0x00ff00)
-            if thumbnail:
-                embed.set_thumbnail(url=thumbnail)
             embed.add_field(name="Duration", value=duration, inline=True)
             await ctx.send(embed=embed)
 
@@ -143,46 +128,31 @@ def create_bot(token, prefix):
         latency = round(bot.latency * 1000)
         await ctx.send(f"🏓 Pong! Latency: {latency}ms")
 
-    # ------------------ HELP COMMAND (برايفت إيمبد) ------------------
+    # ------------------ HELP COMMAND ------------------
     @bot.command(name="help", aliases=["h"])
     async def help_command(ctx):
-
         embed = Embed(
             title="📜 Bot Commands",
             description="Here is a list of available commands:",
             color=0x00ff00
         )
-
         embed.add_field(
             name="🎵 Music Commands",
-            value="`play [title/URL]`\n"
-                  "`skip`\n"
-                  "`pause`\n"
-                  "`resume`\n"
-                  "`stop`",
+            value="`play [title]`\n`skip`\n`pause`\n`resume`\n`stop`",
             inline=False
         )
-
         embed.add_field(
             name="🏓 Utility",
-            value="`ping`\n"
-                  "`help`",
+            value="`ping`\n`help`",
             inline=False
         )
-
-        embed.set_footer(
-            text=f"Requested by {ctx.author}",
-            icon_url=ctx.author.display_avatar.url
-        )
-
+        embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
         try:
             dm = await ctx.author.create_dm()
             await dm.send(embed=embed)
             await ctx.message.add_reaction("📬")
         except discord.Forbidden:
-            await ctx.send("❌ افتح الخاص بتاعك من السيرفر علشان أقدر أبعتلك الهيلب.")
-        except:
-            await ctx.send("❌ حصل خطأ أثناء إرسال الرسالة الخاصة.")
+            await ctx.send("❌ افتح الخاص علشان أقدر أبعتلك الهيلب.")
 
     # ------------------ REACT ON COMMAND ------------------
     @bot.event
@@ -197,14 +167,12 @@ def create_bot(token, prefix):
     async def on_message(message):
         if message.author.bot:
             return
-
         if bot.user.mentioned_in(message):
             parts = message.content.split()
             if len(parts) >= 2:
                 new_prefix = parts[1]
                 bot.command_prefix = new_prefix
                 await message.channel.send(f"✅ Prefix changed to: {new_prefix}")
-
         await bot.process_commands(message)
 
     @bot.event

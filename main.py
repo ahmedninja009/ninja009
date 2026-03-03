@@ -104,7 +104,7 @@ async def resume(ctx):
     else:
         await ctx.send("❌ No song is paused.")
 
-@bot.command(name="stop", aliases=["وقف", "st"])
+@bot.command(name="stop", aliases=["وقف", "sst"])
 async def stop(ctx):
     if ctx.voice_client:
         queue.clear()

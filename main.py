@@ -59,7 +59,7 @@ async def play(ctx, *, search: str = None):
 
     if not search:
         await ctx.send(
-<a:haha:1477862116651302993> Play Usage:\n"
+            "<a:haha:1477862116651302993> Play Usage:\n"
             "play [track title] - play track by the first result\n"
             "play [URL] - play track by provided link"
         )

@@ -16,8 +16,10 @@ intents.voice_states = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ================== QUEUE ==================
+# ================== QUEUE SYSTEM ==================
 queue = []
+current_song = None
+current_title = None
 
 # ================== OPTIONS ==================
 FFMPEG_OPTIONS = {
@@ -30,14 +32,40 @@ YDL_OPTIONS = {
     'noplaylist': True
 }
 
-# ================== PLAY NEXT ==================
-def play_next(ctx):
+# ================== EMBED FUNCTION ==================
+def create_embed(title, description, color=discord.Color.blue()):
+    embed = discord.Embed(title=title, description=description, color=color)
+    return embed
+
+# ================== PLAY FUNCTIONS ==================
+
+async def start_playing(ctx, url, title):
+    global current_song, current_title
+
+    current_song = url
+    current_title = title
+
+    ctx.voice_client.play(
+        FFmpegPCMAudio(url, **FFMPEG_OPTIONS),
+        after=lambda e: bot.loop.create_task(play_next(ctx))
+    )
+
+    embed = create_embed("🎶 Now Playing", f"**{title}**", discord.Color.green())
+    await ctx.send(embed=embed)
+
+
+async def play_next(ctx):
+    global current_song, current_title
+
     if len(queue) > 0:
-        next_song = queue.pop(0)
-        ctx.voice_client.play(
-            FFmpegPCMAudio(next_song, **FFMPEG_OPTIONS),
-            after=lambda e: play_next(ctx)
-        )
+        url, title = queue.pop(0)
+        await start_playing(ctx, url, title)
+    else:
+        current_song = None
+        current_title = None
+        embed = create_embed("📭 Queue Finished", "مفيش أغاني تاني.", discord.Color.red())
+        await ctx.send(embed=embed)
+
 
 # ================== COMMANDS ==================
 
@@ -45,8 +73,8 @@ def play_next(ctx):
 @bot.command()
 async def play(ctx, *, search: str):
     if ctx.author.voice is None:
-        await ctx.send("❌ لازم تكون في روم صوتي الأول!")
-        return
+        embed = create_embed("❌ Error", "لازم تكون في روم صوتي الأول!", discord.Color.red())
+        return await ctx.send(embed=embed)
 
     voice_channel = ctx.author.voice.channel
 
@@ -58,60 +86,101 @@ async def play(ctx, *, search: str):
         url = info['url']
         title = info['title']
 
-    queue.append(url)
-
-    if not ctx.voice_client.is_playing():
-        source = FFmpegPCMAudio(queue.pop(0), **FFMPEG_OPTIONS)
-        ctx.voice_client.play(
-            source,
-            after=lambda e: play_next(ctx)
-        )
-        await ctx.send(f"🎶 **Now Playing:** {title}")
+    if ctx.voice_client.is_playing():
+        queue.append((url, title))
+        embed = create_embed("✅ Added to Queue", f"**{title}**", discord.Color.orange())
+        await ctx.send(embed=embed)
     else:
-        await ctx.send(f"✅ Added to queue: {title}")
+        await start_playing(ctx, url, title)
+
 
 # ⏭ Skip
 @bot.command()
 async def skip(ctx):
+    global current_title
+
     if ctx.voice_client and ctx.voice_client.is_playing():
+        embed = create_embed("⏭ Skipped", f"تم تخطي: **{current_title}**", discord.Color.orange())
+        await ctx.send(embed=embed)
         ctx.voice_client.stop()
-        await ctx.send("⏭️ تم تخطي الأغنية!")
     else:
-        await ctx.send("❌ مفيش أغنية شغالة.")
+        embed = create_embed("❌ Error", "مفيش أغنية شغالة.", discord.Color.red())
+        await ctx.send(embed=embed)
+
 
 # ⏸ Pause
 @bot.command()
 async def pause(ctx):
     if ctx.voice_client and ctx.voice_client.is_playing():
         ctx.voice_client.pause()
-        await ctx.send("⏸️ تم إيقاف الأغنية مؤقتًا.")
+        embed = create_embed("⏸ Paused", "تم إيقاف الأغنية مؤقتًا.", discord.Color.gold())
+        await ctx.send(embed=embed)
     else:
-        await ctx.send("❌ مفيش أغنية شغالة.")
+        embed = create_embed("❌ Error", "مفيش أغنية شغالة.", discord.Color.red())
+        await ctx.send(embed=embed)
+
 
 # ▶ Resume
 @bot.command()
 async def resume(ctx):
     if ctx.voice_client and ctx.voice_client.is_paused():
         ctx.voice_client.resume()
-        await ctx.send("▶️ تم استكمال الأغنية.")
+        embed = create_embed("▶ Resumed", "تم استكمال الأغنية.", discord.Color.green())
+        await ctx.send(embed=embed)
     else:
-        await ctx.send("❌ مفيش أغنية متوقفة.")
+        embed = create_embed("❌ Error", "مفيش أغنية متوقفة.", discord.Color.red())
+        await ctx.send(embed=embed)
+
 
 # 🛑 Stop
 @bot.command()
 async def stop(ctx):
+    global current_song, current_title
+
     if ctx.voice_client:
         queue.clear()
+        current_song = None
+        current_title = None
         await ctx.voice_client.disconnect()
-        await ctx.send("🛑 تم إيقاف التشغيل والخروج من الروم.")
+        embed = create_embed("🛑 Stopped", "تم إيقاف التشغيل والخروج من الروم.", discord.Color.red())
+        await ctx.send(embed=embed)
     else:
-        await ctx.send("❌ البوت مش في روم صوتي.")
+        embed = create_embed("❌ Error", "البوت مش في روم صوتي.", discord.Color.red())
+        await ctx.send(embed=embed)
+
+
+# 📜 Queue
+@bot.command()
+async def queue_list(ctx):
+    if not queue:
+        embed = create_embed("📭 Queue", "الكيو فاضي.", discord.Color.blue())
+        await ctx.send(embed=embed)
+    else:
+        msg = ""
+        for i, song in enumerate(queue, start=1):
+            msg += f"{i}- {song[1]}\n"
+        embed = create_embed("📜 Current Queue", msg, discord.Color.blue())
+        await ctx.send(embed=embed)
+
+
+# 📢 Now Playing
+@bot.command()
+async def now(ctx):
+    if current_title:
+        embed = create_embed("🎵 Now Playing", f"**{current_title}**", discord.Color.green())
+        await ctx.send(embed=embed)
+    else:
+        embed = create_embed("❌ Error", "مفيش حاجة شغالة.", discord.Color.red())
+        await ctx.send(embed=embed)
+
 
 # 🏓 Ping
 @bot.command()
 async def ping(ctx):
     latency = round(bot.latency * 1000)
-    await ctx.send(f"🏓 Pong! البينج: {latency}ms")
+    embed = create_embed("🏓 Pong!", f"البينج: **{latency}ms**", discord.Color.blurple())
+    await ctx.send(embed=embed)
+
 
 # ================== RUN ==================
 bot.run(TOKEN)

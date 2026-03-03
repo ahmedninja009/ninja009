@@ -30,6 +30,34 @@ def create_bot(token, prefix):
 
     bot = commands.Bot(command_prefix=prefix, intents=intents)
     bot.queue = []
+    bot.prefixes = {}  # لتخزين البرفيكس لكل سيرفر
+
+    # ===== AUTO-REACT ON COMMAND =====
+    @bot.event
+    async def on_command(ctx):
+        try:
+            await ctx.message.add_reaction("✅")
+        except:
+            pass
+
+    # ===== CHANGE PREFIX WITH MENTION =====
+    @bot.event
+    async def on_message(message):
+        if message.author.bot:
+            return
+        # تحقق من منشن للبوت لتغيير البرفيكس
+        if bot.user in message.mentions:
+            content = message.content.replace(f"<@{bot.user.id}>", "").strip()
+            if content:
+                bot.prefixes[message.guild.id] = content
+                await message.channel.send(f"✅ Prefix changed to `{content}` for this server!")
+        await bot.process_commands(message)
+
+    # لتحديد البرفيكس حسب السيرفر
+    async def get_prefix(bot_instance, message):
+        return bot.prefixes.get(message.guild.id, prefix)
+
+    bot.command_prefix = get_prefix
 
     # ===== PLAY NEXT =====
     def play_next(ctx):
@@ -113,6 +141,25 @@ def create_bot(token, prefix):
             await ctx.send("🛑 Playback stopped and disconnected.")
         else:
             await ctx.send("❌ Bot is not in a voice channel.")
+
+    # ===== HELP COMMAND =====
+    @bot.command(name="help", aliases=["h"])
+    async def help_command(ctx):
+        embed = Embed(title="Bot Commands", color=0x00ff00)
+        embed.add_field(name="play [song]", value="Play a song or add to queue", inline=False)
+        embed.add_field(name="skip", value="Skip current song", inline=False)
+        embed.add_field(name="pause", value="Pause current song", inline=False)
+        embed.add_field(name="resume", value="Resume paused song", inline=False)
+        embed.add_field(name="stop", value="Stop playback and leave VC", inline=False)
+        embed.add_field(name="ping", value="Show bot latency", inline=False)
+        try:
+            await ctx.message.add_reaction("✅")
+        except:
+            pass
+        try:
+            await ctx.author.send(embed=embed)
+        except:
+            await ctx.send("❌ I can't DM you. Please check your privacy settings.")
 
     @bot.command(name="ping")
     async def ping(ctx):

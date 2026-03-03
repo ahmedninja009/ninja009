@@ -14,7 +14,8 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
 
-bot = commands.Bot(command_prefix=commands.when_mentioned, intents=intents)
+# Use a fixed prefix "!" instead of mention
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ================== QUEUE ==================
 queue = []
@@ -46,8 +47,8 @@ def play_next(ctx):
 
 # ================== COMMANDS ==================
 
-@bot.command(name="شغل", aliases=["ش", "p"])
-async def play(ctx, *, search: str):
+@bot.command(name="play", aliases=["ش", "p"])
+async def play_song(ctx, *, search: str):
     if ctx.author.voice is None:
         await ctx.send("❌ You must be in a voice channel first!")
         return
@@ -79,7 +80,7 @@ async def play(ctx, *, search: str):
         embed.add_field(name="Duration", value=duration, inline=True)
         await ctx.send(embed=embed)
 
-@bot.command(name="skip", aliases=["تخطي", "s"])
+@bot.command(name="skip", aliases=["تخطي", "st"])
 async def skip(ctx):
     if ctx.voice_client and ctx.voice_client.is_playing():
         ctx.voice_client.stop()
@@ -87,7 +88,7 @@ async def skip(ctx):
     else:
         await ctx.send("❌ No song is playing.")
 
-@bot.command(name="pause", aliases=["ايقاف", "pa"])
+@bot.command(name="pause", aliases=["ايقاف", "ps"])
 async def pause(ctx):
     if ctx.voice_client and ctx.voice_client.is_playing():
         ctx.voice_client.pause()
@@ -103,7 +104,7 @@ async def resume(ctx):
     else:
         await ctx.send("❌ No song is paused.")
 
-@bot.command(name="stop", aliases=["اوقف", "st"])
+@bot.command(name="stop", aliases=["وقف", "st"])
 async def stop(ctx):
     if ctx.voice_client:
         queue.clear()
@@ -112,7 +113,7 @@ async def stop(ctx):
     else:
         await ctx.send("❌ Bot is not in a voice channel.")
 
-@bot.command(name="ping", aliases=["بينج"])
+@bot.command(name="ping")
 async def ping(ctx):
     latency = round(bot.latency * 1000)
     await ctx.send(f"🏓 Pong! Latency: {latency}ms")

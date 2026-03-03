@@ -1,0 +1,4 @@
+configs = [
+    {"token": os.environ.get("TOKEN1"), "prefix": "!"},
+    {"token": os.environ.get("TOKEN2"), "prefix": "?"}
+]

@@ -64,7 +64,7 @@ def create_bot(token, prefix):
 
     async def play_next_async(ctx):
         await asyncio.sleep(1)
-        play_next(ctx))
+        play_next(ctx)
 
     # ------------------ COMMANDS ------------------
 

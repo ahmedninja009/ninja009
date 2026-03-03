@@ -3,21 +3,15 @@ import discord
 from discord.ext import commands
 from discord import FFmpegPCMAudio, Embed
 from yt_dlp import YoutubeDL
+import asyncio
 
-# ================== TOKEN ==================
-TOKEN = os.environ.get("TOKEN")
-if not TOKEN:
-    raise ValueError("Please set your TOKEN in Environment Variables.")
-
-# ================== INTENTS ==================
-intents = discord.Intents.default()
-intents.message_content = True
-intents.voice_states = True
-
-bot = commands.Bot(command_prefix="!", intents=intents)
-
-# ================== QUEUE ==================
-queue = []
+# ================== TOKENS ==================
+# كل توكن مع البرفكس الخاص به
+BOTS_CONFIG = [
+    {"token": os.environ.get("TOKEN1"), "prefix": "!"},
+    {"token": os.environ.get("TOKEN2"), "prefix": "?"},
+    # ممكن تضيف اكتر
+]
 
 # ================== OPTIONS ==================
 FFMPEG_OPTIONS = {
@@ -30,114 +24,134 @@ YDL_OPTIONS = {
     'noplaylist': True
 }
 
-# ================== PLAY NEXT ==================
-def play_next(ctx):
-    if len(queue) > 0:
-        next_song = queue.pop(0)
-        ctx.voice_client.play(
-            FFmpegPCMAudio(next_song['url'], **FFMPEG_OPTIONS),
-            after=lambda e: play_next(ctx)
-        )
-        embed = Embed(title="<a:59444:1471069770106273892>  Now Playing", description=f"{next_song['title']}", color=0x00ff00)
-        if next_song['thumbnail']:
-            embed.set_thumbnail(url=next_song['thumbnail'])
-        embed.add_field(name="Duration", value=next_song['duration'], inline=True)
-        bot.loop.create_task(ctx.send(embed=embed))
+# ================== CREATE BOT ==================
+def create_bot(initial_prefix):
+    intents = discord.Intents.default()
+    intents.message_content = True
+    intents.voice_states = True
 
-# ================== COMMANDS ==================
+    # نخلي البرفكس ممكن يتغير لما حد يعمل منشن للبوت
+    bot = commands.Bot(command_prefix=commands.when_mentioned_or(initial_prefix), intents=intents)
 
-# 🎵 تشغيل الأغنية
-@bot.command(name="شغل", aliases=["ش", "p"])
-async def play(ctx, *, search: str = None):
-    if ctx.author.voice is None:
-        await ctx.send("<a:59444:1471069770106273892>  You must be in a voice channel first!")
-        return
+    queue = []
 
-    voice_channel = ctx.author.voice.channel
-    if ctx.voice_client is None:
-        await voice_channel.connect()
+    def play_next(ctx):
+        if len(queue) > 0:
+            next_song = queue.pop(0)
+            ctx.voice_client.play(
+                FFmpegPCMAudio(next_song['url'], **FFMPEG_OPTIONS),
+                after=lambda e: play_next(ctx)
+            )
+            embed = Embed(title="🎶 Now Playing", description=f"{next_song['title']}", color=0x00ff00)
+            if next_song['thumbnail']:
+                embed.set_thumbnail(url=next_song['thumbnail'])
+            embed.add_field(name="Duration", value=next_song['duration'], inline=True)
+            asyncio.create_task(ctx.send(embed=embed))
 
-    if not search:
-        await ctx.send(
-            "<a:haha:1477862116651302993> Play Usage:\n"
-            "play [track title] - play track by the first result\n"
-            "play [URL] - play track by provided link"
-        )
-        await ctx.message.add_reaction("")
-        return
+    # ================== COMMANDS ==================
+    @bot.command(name="play", aliases=["شغل","ش","p"])
+    async def play(ctx, *, search: str = None):
+        if ctx.author.voice is None:
+            await ctx.send("❌ You must be in a voice channel first!")
+            return
+        voice_channel = ctx.author.voice.channel
+        if ctx.voice_client is None:
+            await voice_channel.connect()
+        if not search:
+            await ctx.send("💡 Play Usage:\nplay [track title]\nplay [URL]")
+            await ctx.message.add_reaction("✅")
+            return
+        with YoutubeDL(YDL_OPTIONS) as ydl:
+            info = ydl.extract_info(f"ytsearch:{search}", download=False)['entries'][0]
+            url = info['url']
+            title = info['title']
+            thumbnail = info.get('thumbnail', None)
+            duration = info.get('duration_string', "Unknown")
+        song = {"url": url, "title": title, "thumbnail": thumbnail, "duration": duration}
+        if ctx.voice_client.is_playing():
+            queue.append(song)
+            await ctx.send(f"✅ Added to queue: **{title}**")
+            await ctx.message.add_reaction("✅")
+        else:
+            ctx.voice_client.play(
+                FFmpegPCMAudio(url, **FFMPEG_OPTIONS),
+                after=lambda e: play_next(ctx)
+            )
+            embed = Embed(title="🎶 Now Playing", description=f"{title}", color=0x00ff00)
+            if thumbnail:
+                embed.set_thumbnail(url=thumbnail)
+            embed.add_field(name="Duration", value=duration, inline=True)
+            await ctx.send(embed=embed)
+            await ctx.message.add_reaction("✅")
 
-    with YoutubeDL(YDL_OPTIONS) as ydl:
-        info = ydl.extract_info(f"ytsearch:{search}", download=False)['entries'][0]
-        url = info['url']
-        title = info['title']
-        thumbnail = info.get('thumbnail', None)
-        duration = info.get('duration_string', "Unknown")
+    @bot.command(name="skip", aliases=["تخطي","s"])
+    async def skip(ctx):
+        if ctx.voice_client and ctx.voice_client.is_playing():
+            ctx.voice_client.stop()
+            await ctx.send("⏭️ Song skipped!")
+            await ctx.message.add_reaction("✅")
+        else:
+            await ctx.send("❌ No song is playing.")
 
-    song = {"url": url, "title": title, "thumbnail": thumbnail, "duration": duration}
+    @bot.command(name="pause", aliases=["ايقاف","pa"])
+    async def pause(ctx):
+        if ctx.voice_client and ctx.voice_client.is_playing():
+            ctx.voice_client.pause()
+            await ctx.send("⏸️ Song paused.")
+            await ctx.message.add_reaction("✅")
+        else:
+            await ctx.send("❌ No song is playing.")
 
-    if ctx.voice_client.is_playing():
-        queue.append(song)
-        await ctx.send(f"<a:59444:1471069770106273892>  Added to queue: **{title}**")
-        await ctx.message.add_reaction("")
-    else:
-        ctx.voice_client.play(
-            FFmpegPCMAudio(url, **FFMPEG_OPTIONS),
-            after=lambda e: play_next(ctx)
-        )
-        embed = Embed(title="<a:59444:1471069770106273892>  Now Playing", description=f"{title}", color=0x00ff00)
-        if thumbnail:
-            embed.set_thumbnail(url=thumbnail)
-        embed.add_field(name="Duration", value=duration, inline=True)
-        await ctx.send(embed=embed)
-        await ctx.message.add_reaction("<a:59444:1471069770106273892> ")
+    @bot.command(name="resume", aliases=["كمل","r"])
+    async def resume(ctx):
+        if ctx.voice_client and ctx.voice_client.is_paused():
+            ctx.voice_client.resume()
+            await ctx.send("▶️ Song resumed.")
+            await ctx.message.add_reaction("✅")
+        else:
+            await ctx.send("❌ No song is paused.")
 
-# ⏭ تخطي
-@bot.command(name="skip", aliases=["تخطي", "s"])
-async def skip(ctx):
-    if ctx.voice_client and ctx.voice_client.is_playing():
-        ctx.voice_client.stop()
-        await ctx.send("<a:59444:1471069770106273892>  Song skipped!")
-        await ctx.message.add_reaction("<a:59444:1471069770106273892> ")
-    else:
-        await ctx.send("<a:59444:1471069770106273892>  No song is playing.")
+    @bot.command(name="stop", aliases=["اوقف","st"])
+    async def stop(ctx):
+        if ctx.voice_client:
+            queue.clear()
+            await ctx.voice_client.disconnect()
+            await ctx.send("🛑 Playback stopped and disconnected.")
+            await ctx.message.add_reaction("✅")
+        else:
+            await ctx.send("❌ Bot is not in a voice channel.")
 
-# ⏸ إيقاف مؤقت
-@bot.command(name="pause", aliases=["ايقاف", "pa"])
-async def pause(ctx):
-    if ctx.voice_client and ctx.voice_client.is_playing():
-        ctx.voice_client.pause()
-        await ctx.send("⏸️ Song paused.")
-        await ctx.message.add_reaction("<a:59444:1471069770106273892> ")
-    else:
-        await ctx.send("<a:59444:1471069770106273892>  No song is playing.")
+    @bot.command(name="ping", aliases=["بينج"])
+    async def ping(ctx):
+        latency = round(bot.latency * 1000)
+        await ctx.send(f"🏓 Pong! Latency: {latency}ms")
+        await ctx.message.add_reaction("✅")
 
-# ▶ استكمال
-@bot.command(name="resume", aliases=["كمل", "r"])
-async def resume(ctx):
-    if ctx.voice_client and ctx.voice_client.is_paused():
-        ctx.voice_client.resume()
-        await ctx.send("<a:59444:1471069770106273892>  Song resumed.")
-        await ctx.message.add_reaction("<a:59444:1471069770106273892> ")
-    else:
-        await ctx.send("<a:59444:1471069770106273892>  No song is paused.")
+    # ================== CHANGE PREFIX ==================
+    @bot.event
+    async def on_message(message):
+        if message.author.bot:
+            return
+        # لو البوت تم منشنه، يغير البرفكس
+        if bot.user.mentioned_in(message):
+            parts = message.content.split()
+            if len(parts) > 1:
+                new_prefix = parts[1]
+                bot.command_prefix = commands.when_mentioned_or(new_prefix)
+                await message.channel.send(f"✅ Prefix changed to: `{new_prefix}`")
+        await bot.process_commands(message)
 
-# <a:59444:1471069770106273892>  إيقاف نهائي
-@bot.command(name="stop", aliases=["اوقف", "st"])
-async def stop(ctx):
-    if ctx.voice_client:
-        queue.clear()
-        await ctx.voice_client.disconnect()
-        await ctx.send("<a:59444:1471069770106273892>  Playback stopped and disconnected.")
-        await ctx.message.add_reaction("<a:59444:1471069770106273892> ")
-    else:
-        await ctx.send("<a:59444:1471069770106273892>  Bot is not in a voice channel.")
+    return bot
 
-# 🏓 بينج
-@bot.command(name="ping", aliases=["بينج"])
-async def ping(ctx):
-    latency = round(bot.latency * 1000)
-    await ctx.send(f"🏓 Pong! Latency: {latency}ms")
-    await ctx.message.add_reaction("<a:59444:1471069770106273892> ")
+# ================== RUN ALL BOTS ==================
+async def start_all_bots():
+    tasks = []
+    for config in BOTS_CONFIG:
+        token = config.get("token")
+        prefix = config.get("prefix", "!")
+        if token:
+            bot_instance = create_bot(prefix)
+            tasks.append(bot_instance.start(token))
+    await asyncio.gather(*tasks)
 
-# ================== RUN ==================
-bot.run(TOKEN)
+asyncio.run(start_all_bots())
